@@ -653,7 +653,7 @@ void cl_copyBufferToHost(void* dst, cl_mem src, size_t mem_size, cl_bool blockin
     \param dst Empty device image
     \param mem_size Size of data to copy
 */
-void cl_copyBufferToImage(cl_mem buffer, cl_mem image, int height, int width) 
+void cl_copyBufferToImage(cl_mem buffer, cl_mem image, size_t height, size_t width) 
 {
     size_t origin[3] = {0, 0, 0};
     size_t region[3] = {width, height, 1};

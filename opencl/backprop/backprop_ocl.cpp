@@ -188,7 +188,7 @@ int bpnn_train_kernel(BPNN *net, float *eo, float *eh)
 	partial_sum = (float *) malloc(num_blocks * WIDTH * sizeof(float));
 
 	// set global and local workitems
-	size_t global_work[3] = { BLOCK_SIZE, BLOCK_SIZE * num_blocks, 1 };
+	size_t global_work[3] = { BLOCK_SIZE, (size_t)(BLOCK_SIZE * num_blocks), 1 };
 	size_t local_work[3] = { BLOCK_SIZE, BLOCK_SIZE, 1 };
 
 	// this preprocessing stage is temporarily added to correct the bug of wrong memcopy using two-dimensional net->inputweights

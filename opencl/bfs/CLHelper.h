@@ -504,7 +504,7 @@ cl_mem _clCreateAndCpyPinnedMem(int size, float* h_mem_source) throw(string)
         throw(string("excpetion in _clCreateAndCpyMem() -> clEnqueueMapBuffer"));
 #endif
     int element_number = size/sizeof(float);
-    #pragma omp parallel for
+//    #pragma omp parallel for
     for(int i=0; i<element_number; i++) {
         h_mem_pinned[i] = h_mem_source[i];
     }
@@ -681,7 +681,7 @@ void _clFinish() throw(string)
 }
 //--------------------------------------------------------
 //--cambine:enqueue kernel
-void _clInvokeKernel(int kernel_id, int work_items, int work_group_size) throw(string)
+void _clInvokeKernel(int kernel_id, size_t work_items, size_t work_group_size) throw(string)
 {
     cl_uint work_dim = WORK_DIM;
     cl_event e[1];
@@ -754,7 +754,7 @@ void _clInvokeKernel(int kernel_id, int work_items, int work_group_size) throw(s
     //     throw(string("excpetion in _clEnqueueNDRange() -> clWaitForEvents"));
     // #endif
 }
-void _clInvokeKernel2D(int kernel_id, int range_x, int range_y, int group_x, int group_y) throw(string)
+void _clInvokeKernel2D(int kernel_id, size_t range_x, size_t range_y, size_t group_x, size_t group_y) throw(string)
 {
     cl_uint work_dim = WORK_DIM;
     size_t local_work_size[] = {group_x, group_y};

@@ -708,7 +708,7 @@ int particleFilter(int * I, int IszX, int IszY, int Nfr, int * seed, int Npartic
 
 
 		//KERNEL FUNCTION CALL
-		size_t global_work[3] = {num_blocks*threads_per_block, 1, 1};
+		size_t global_work[3] = {(size_t)(num_blocks*threads_per_block), 1, 1};
 		err = clEnqueueNDRangeKernel(cmd_queue, kernel_s, 1, NULL, global_work, NULL, 0, 0, 0);
 		clFinish(cmd_queue);
 		long long start_copy_back = get_time();

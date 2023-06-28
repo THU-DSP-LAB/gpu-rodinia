@@ -3,17 +3,6 @@ include ../../common/make.config
 #Can be changed by `make TYPE=CPU`
 TYPE = GPU
 
-#Library
-ifeq ($(TYPE),GPU)
-	OPENCL_DIR = $(NV_OPENCL_DIR)
-	OPENCL_INC = $(NV_OPENCL_INC)
-	OPENCL_LIB = $(NV_OPENCL_LIB)
-else
-	OPENCL_DIR = $(INTEL_OPENCL_DIR)
-	OPENCL_INC = $(INTEL_OPENCL_INC)
-	OPENCL_LIB = $(INTEL_OPENCL_LIB)
-endif
-
 ifdef OUTPUT
 override OUTPUT = -DOUTPUT
 endif
@@ -21,7 +10,7 @@ endif
 OCL_INC_DIR = -I$(OPENCL_INC)
 OCL_LIB_DIR = -L$(OPENCL_LIB)
 
-C_C = gcc
+C_C = clang
 OCL_LIB = -lOpenCL
 
 EXE = heartwall.out
@@ -43,7 +32,7 @@ $(EXE):	./main.o \
 			../util/timing.c \
 			-lm \
 			$(OCL_LIB_DIR) \
-			$(OCL_LIB) -o $(EXE)
+			$(OCL_LIB) $(OCL_INC_DIR) -o $(EXE)
 
 run: $(EXE)
 	./$(EXE) -n 100 -f ../../data/heartwall/test.avi -i ../../data/heartwall/input.txt -p 0 -d 0
@@ -57,7 +46,7 @@ run: $(EXE)
 	$(C_C)	$(OUTPUT) $(KERNEL_DIM) ./main.c \
 			-c \
 			-o ./main.o \
-			-O3
+			-O3 $(OCL_INC_DIR)
 
 # ======================================================================================================================================================150
 #	KERNELS

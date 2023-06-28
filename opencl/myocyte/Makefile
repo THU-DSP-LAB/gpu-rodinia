@@ -3,19 +3,11 @@ include ../../common/make.config
 #Can be changed by `make TYPE=CPU`
 TYPE = GPU
 
-#Library
-ifeq ($(TYPE),GPU)
-	OPENCL_INC = $(NV_OPENCL_INC)
-	OPENCL_LIB = $(NV_OPENCL_LIB)
-else
-	OPENCL_INC = $(INTEL_OPENCL_INC)
-	OPENCL_LIB = $(INTEL_OPENCL_LIB)
-endif
-
 #	COMPILER
 # ======================================================================================================================================================150
-C_C = gcc
+C_C = clang
 OCL_LIB = -lOpenCL
+OCL_INC = -I$(OPENCL_INC)
 
 # ======================================================================================================================================================150
 #	END
@@ -84,7 +76,7 @@ OCL_LIB = -lOpenCL
 # ======================================================================================================================================================150
 
 ./timing.o: ../util/timing.c
-	$(C_C)  ../util/timing.c -I../util -c -o ./timing.o -O3
+	$(C_C)  ../util/timing.c -I../util -c -o ./timing.o -O3 $(OCL_INC)
 
 ./util/file/file.o:	./common.h \
 					./util/file/file.h \

@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <float.h>
 #include <math.h>
-#include <omp.h>
+// #include <omp.h>
 
 #include "kmeans.h"
 
@@ -71,7 +71,7 @@ float rms_err	(float **feature,         /* [npoints][nfeatures] */
     float  ret;						/* return value */
     
     /* calculate and sum the sqaure of euclidean distance*/	
-    #pragma omp parallel for \
+//    #pragma omp parallel for \
                 shared(feature,cluster_centres) \
                 firstprivate(npoints,nfeatures,nclusters) \
                 private(i, nearest_cluster_index) \

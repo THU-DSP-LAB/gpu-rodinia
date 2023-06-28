@@ -234,7 +234,7 @@ int allocate(int n_points, int n_features, int n_clusters, float **feature)
 	clSetKernelArg(kernel2, 2, sizeof(cl_int), (void*) &n_points);
 	clSetKernelArg(kernel2, 3, sizeof(cl_int), (void*) &n_features);
 	
-	size_t global_work[3] = { n_points, 1, 1 };
+	size_t global_work[3] = { (size_t)n_points, 1, 1 };
 	/// Ke Wang adjustable local group size 2013/08/07 10:37:33
 	size_t local_work_size= BLOCK_SIZE; // work group size is defined by RD_WG_SIZE_0 or RD_WG_SIZE_0_0 2014/06/10 17:00:51
 	if(global_work[0]%local_work_size !=0)
@@ -308,7 +308,7 @@ int	kmeansOCL(float **feature,    /* in: [npoints][nfeatures] */
 	cl_int err = 0;
 	cl_event event;
 	
-	size_t global_work[3] = { n_points, 1, 1 }; 
+	size_t global_work[3] = { (size_t)n_points, 1, 1 }; 
 
 	/// Ke Wang adjustable local group size 2013/08/07 10:37:33
 	size_t local_work_size=BLOCK_SIZE2; // work group size is defined by RD_WG_SIZE_1 or RD_WG_SIZE_1_0 2014/06/10 17:00:41

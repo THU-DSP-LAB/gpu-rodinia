@@ -1227,7 +1227,7 @@ void _clFinish() throw(string){
 	@return:	NULL
 	@date:		03/04/2011
 ------------------------------------------------------------*/
-void _clInvokeKernel(int kernel_id, int work_items, int work_group_size) throw(string){
+void _clInvokeKernel(int kernel_id, size_t work_items, size_t work_group_size) throw(string){
 #ifdef PROFILE_
 	double t1 = gettime();
 #endif
@@ -1362,7 +1362,7 @@ void _clMemset(cl_mem mem_d, short val, int number_bytes)throw(string){
 	@return:	NULL
 	@date:		03/04/2011
 ------------------------------------------------------------*/
-void _clInvokeKernel2D(int kernel_id, int range_x, int range_y, int group_x, int group_y) throw(string){
+void _clInvokeKernel2D(int kernel_id, size_t range_x, size_t range_y, size_t group_x, size_t group_y) throw(string){
 #ifdef PROFILE_
 	double t1 = gettime();
 #endif

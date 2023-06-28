@@ -1121,8 +1121,8 @@ void _clInvokeKernel(int kernel_id, int work_items, int work_group_size) throw(s
 	cl_event e[1];
 	if(work_items%work_group_size != 0)	//process situations that work_items cannot be divided by work_group_size
 	  work_items = work_items + (work_group_size-(work_items%work_group_size));
-  	size_t local_work_size[] = {work_group_size, 1};
-	size_t global_work_size[] = {work_items, 1};
+  	size_t local_work_size[] = {(size_t)work_group_size, 1};
+	size_t global_work_size[] = {(size_t)work_items, 1};
 	oclHandles.cl_status = clEnqueueNDRangeKernel(oclHandles.queue, oclHandles.kernel[kernel_id], work_dim, 0, \
 											global_work_size, local_work_size, 0 , 0, &(e[0]) );	
 	#ifdef ERRMSG
@@ -1243,8 +1243,8 @@ void _clMemset(cl_mem mem_d, short val, int number_bytes)throw(string){
 	cl_event e[1];
 	if(work_items%work_group_size != 0)	//process situations that work_items cannot be divided by work_group_size
 	  work_items = work_items + (work_group_size-(work_items%work_group_size));
-  	size_t local_work_size[] = {work_group_size, 1};
-	size_t global_work_size[] = {work_items, 1};
+  	size_t local_work_size[] = {(size_t)work_group_size, 1};
+	size_t global_work_size[] = {(size_t)work_items, 1};
 	oclHandles.cl_status = clEnqueueNDRangeKernel(oclHandles.queue, oclHandles.kernel[kernel_id], work_dim, 0, \
 											global_work_size, local_work_size, 0 , 0, &(e[0]) );	
 #ifdef ERRMSG
@@ -1356,8 +1356,8 @@ void _clInvokeKernel2D(int kernel_id, int range_x, int range_y, int group_x, int
 	double t1 = gettime();
 #endif
 	cl_uint work_dim = WORK_DIM;
-	size_t local_work_size[] = {group_x, group_y};
-	size_t global_work_size[] = {range_x, range_y};
+	size_t local_work_size[] = {(size_t)group_x, (size_t)group_y};
+	size_t global_work_size[] = {(size_t)range_x, (size_t)range_y};
 	cl_event e[1];
 	/*if(work_items%work_group_size != 0)	//process situations that work_items cannot be divided by work_group_size
 	  work_items = work_items + (work_group_size-(work_items%work_group_size));*/

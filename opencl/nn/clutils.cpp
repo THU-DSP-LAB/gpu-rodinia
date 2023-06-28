@@ -668,7 +668,7 @@ void cl_copyBufferToHost(void* dst, cl_mem src, size_t mem_size, cl_bool blockin
 void cl_copyBufferToImage(cl_mem buffer, cl_mem image, int height, int width) 
 {
     size_t origin[3] = {0, 0, 0};
-    size_t region[3] = {width, height, 1};
+    size_t region[3] = {(size_t)width, (size_t)height, 1};
 
     cl_int status;          
     status = clEnqueueCopyBufferToImage(commandQueue, buffer, image, 0, 

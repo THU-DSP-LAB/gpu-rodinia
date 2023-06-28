@@ -7,22 +7,13 @@ include ../../common/make.config
 #Can be changed by `make TYPE=CPU`
 TYPE = GPU
 
-#Library
-ifeq ($(TYPE),GPU)
-	OPENCL_INC = $(NV_OPENCL_INC)
-	OPENCL_LIB = $(NV_OPENCL_LIB)
-else
-	OPENCL_INC = $(INTEL_OPENCL_INC)
-	OPENCL_LIB = $(INTEL_OPENCL_LIB)
-endif
-
 ifdef OUTPUT
 	override OUTPUT = -DOUTPUT
 endif
 
 OUTPUT = -DOUTPUT
 
-C_C = g++
+C_C = clang++
 OCL_LIB = -lOpenCL -L$(OPENCL_LIB)
 #OCL_INC = -I/usr/local/cuda-5.5/include
 OCL_INC = -I$(OPENCL_INC)

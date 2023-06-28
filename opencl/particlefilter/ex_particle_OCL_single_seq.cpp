@@ -800,8 +800,8 @@ int particleFilter(unsigned char * I, int IszX, int IszY, int Nfr, int * seed, i
     printf("TIME TO SEND TO GPU: %f\n", elapsed_time(send_start, send_end));
     int num_blocks = ceil((float) Nparticles / (float) threads_per_block);
     printf("threads_per_block=%d \n",threads_per_block);
-    size_t local_work[3] = {threads_per_block, 1, 1};
-    size_t global_work[3] = {num_blocks*threads_per_block, 1, 1};
+    size_t local_work[3] = {(size_t)threads_per_block, 1, 1};
+    size_t global_work[3] = {(size_t)num_blocks*threads_per_block, 1, 1};
 
     cl_event kernel_event[3], read_event[3];
     for (k = 1; k < Nfr; k++) {

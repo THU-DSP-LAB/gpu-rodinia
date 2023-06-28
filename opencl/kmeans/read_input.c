@@ -76,7 +76,7 @@
 #include <limits.h>
 #include <math.h>
 #include <fcntl.h>
-#include <omp.h>
+// #include <omp.h>
 #include "kmeans.h"
 #include <unistd.h>
 

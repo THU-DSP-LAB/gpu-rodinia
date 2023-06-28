@@ -62,9 +62,9 @@ COMMONDIR  := $(ROOTDIR)/../common
 
 # Compilers
 NVCC       := $(CUDA_INSTALL_PATH)/bin/nvcc 
-CXX        := g++
-CC         := gcc
-LINK       := g++ -fPIC
+CXX        := clang++
+CC         := clang
+LINK       := clang++ -fPIC
 
 # Includes
 INCLUDES  += -I. -I$(CUDA_INSTALL_PATH)/include -I$(COMMONDIR)/inc

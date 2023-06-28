@@ -91,7 +91,7 @@ void clCmdParams(int argc, char* argv[]) {
 
 int main(int argc, char** argv)
 {
-    int err;                            // error code returned from api calls
+//    int err;                            // error code returned from api calls
     
     unsigned int correct;               // number of correct results returned
 

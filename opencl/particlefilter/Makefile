@@ -3,17 +3,8 @@ include ../../common/make.config
 #Can be changed by `make TYPE=CPU`
 TYPE = GPU
 
-#Library
-ifeq ($(TYPE),GPU)
-	OPENCL_INC = $(NV_OPENCL_INC)
-	OPENCL_LIB = $(NV_OPENCL_LIB)
-else
-	OPENCL_INC = $(INTEL_OPENCL_INC)
-	OPENCL_LIB = $(INTEL_OPENCL_LIB)
-endif
-
 # C compiler
-CC = g++
+CC = clang++
 CC_FLAGS = -O2 
 INCLUDES = -I$(OPENCL_INC) -I../util
 

@@ -3,21 +3,11 @@ include ../../common/make.config
 #Can be changed by `make TYPE=CPU`
 TYPE = GPU
 
-#Library
-ifeq ($(TYPE),GPU)
-	OPENCL_INC = $(NV_OPENCL_INC)
-	OPENCL_LIB = $(NV_OPENCL_LIB)
-else
-	OPENCL_INC = $(INTEL_OPENCL_INC)
-	OPENCL_LIB = $(INTEL_OPENCL_LIB)
-endif
-
-
 #C compiler
-CC = g++
+CC = clang++
 
 
-FLAGS = -O3
+FLAGS = -O3 -std=c++11
 SRC = streamcluster.cpp ../util/timing.c
 EXE = streamcluster.out
 

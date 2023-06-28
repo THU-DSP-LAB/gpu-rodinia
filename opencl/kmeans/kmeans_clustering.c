@@ -65,7 +65,7 @@
 #include <stdlib.h>
 #include <float.h>
 #include <math.h>
-#include <omp.h>
+// #include <omp.h>
 #include "kmeans.h"
 
 #define RANDOM_MAX 2147483647

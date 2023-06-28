@@ -3,15 +3,6 @@ include ../../common/make.config
 #Can be changed by `make TYPE=CPU`
 TYPE = GPU
 
-#Library
-ifeq ($(TYPE),GPU)
-	OPENCL_INC = $(NV_OPENCL_INC)
-	OPENCL_LIB = $(NV_OPENCL_LIB)
-else
-	OPENCL_INC = $(INTEL_OPENCL_INC)
-	OPENCL_LIB = $(INTEL_OPENCL_LIB)
-endif
-
 # Example
 # target: dependencies
 	# command 1
@@ -24,7 +15,7 @@ ifdef OUTPUT
 override OUTPUT = -DOUTPUT
 endif
 
-C_C = gcc
+C_C = clang
 OMP_LIB = -lgomp
 OMP_FLAG = -fopenmp
 OCL_LIB =	-L$(OPENCL_LIB) \
@@ -77,7 +68,7 @@ main.o:		main.h \
 	$(C_C)	$(OUTPUT) $(KERNEL_DIM) -I../util ../util/timing.c \
 			-c \
 			-o timing.o \
-			-O3
+			-O3 $(OCL_INC)
 
 ./util/num/num.o:	./util/num/num.h \
 					./util/num/num.c

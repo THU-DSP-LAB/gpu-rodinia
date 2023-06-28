@@ -1,4 +1,3 @@
 #!/bin/bash
 
-export DATA_DIR=/home/hyu/Projects/gpu-rodinia/data
-./nn.out filelist.txt -r 50 -lat 30 -lng 90 -q -t -f ${DATA_DIR} $@
+./nn.out filelist.txt -r 50 -lat 30 -lng 90 -q -t -f ../../data -p 0 -d 0 

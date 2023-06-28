@@ -356,7 +356,7 @@ void rgbToComponents(cl_mem d_r, cl_mem d_g, cl_mem d_b, unsigned char * h_src, 
     mem_alloc_time += tv.tv_sec * 1000.0 + (float) tv.tv_usec / 1000.0;
 #endif
 
-	size_t globalWorkSize[1] = { alignedSize/3};
+	size_t globalWorkSize[1] = {(size_t)(alignedSize/3)};
     size_t localWorkSize[1] = { THREADS };
 
 	errNum  = clSetKernelArg(c_CopySrcToComponents, 0, sizeof(cl_mem), &d_r);
@@ -409,7 +409,7 @@ void bwToComponent(cl_mem d_c, unsigned char * h_src, int width, int height)
     mem_alloc_time += tv.tv_sec * 1000.0 + (float) tv.tv_usec / 1000.0;
 #endif
 
-	size_t globalWorkSize[1] = { alignedSize/9};
+	size_t globalWorkSize[1] = { (size_t)(alignedSize/9)};
     size_t localWorkSize[1] = { THREADS };
 	assert(alignedSize%(THREADS*3) == 0);
 	
@@ -466,8 +466,8 @@ void launchFDWT53Kernel (int WIN_SX, int WIN_SY, cl_mem in, cl_mem out, int sx, 
 	printf("sliding steps = %d , gx = %d , gy = %d \n", steps, gx, gy);
 	
     // prepare grid size
-	size_t globalWorkSize[2] = { gx*WIN_SX, gy*1};
-    size_t localWorkSize[2]  = { WIN_SX , 1};
+	size_t globalWorkSize[2] = { (size_t)(gx*WIN_SX), (size_t)(gy*1)};
+    size_t localWorkSize[2]  = { (size_t)WIN_SX , 1};
     // printf("\n globalx=%d, globaly=%d, blocksize=%d\n", gx, gy, WIN_SX);
 	
 	errNum  = clSetKernelArg(kl_fdwt53Kernel, 0, sizeof(cl_mem), &in);

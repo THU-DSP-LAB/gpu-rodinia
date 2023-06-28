@@ -33,7 +33,7 @@ using namespace std;
 // Program variables.
 int   rows = -1, cols = -1;
 int   Ne = rows * cols;
-int*  data;
+int*  new_data;
 int** wall;
 int*  result;
 int   pyramid_height = -1;
@@ -100,12 +100,12 @@ void init(int argc, char** argv)
         fprintf(stderr, "usage: %s <-r rows> <-c cols> <-h pyramid_height> [-v] [-p platform_id] [-d device_id] [-t device_type]\n", argv[0]);
 		exit(0);
 	}
-	data = new int[rows * cols];
+	new_data = new int[rows * cols];
 	wall = new int*[rows];
 	for (int n = 0; n < rows; n++)
 	{
-		// wall[n] is set to be the nth row of the data array.
-		wall[n] = data + cols * n;
+		// wall[n] is set to be the nth row of the new_data array.
+		wall[n] = new_data + cols * n;
 	}
 	result = new int[cols];
 
@@ -202,10 +202,10 @@ int main(int argc, char** argv)
 
     cl_event write_event[3];
     clEnqueueWriteBuffer(cl.q(), d_gpuWall, 1, 0,
-        sizeof(cl_int) * (size - cols), (data + cols), 0, 0, &write_event[0]);
+        sizeof(cl_int) * (size - cols), (new_data + cols), 0, 0, &write_event[0]);
 
     clEnqueueWriteBuffer(cl.q(), d_gpuResult[0], 1, 0,
-        sizeof(cl_int) * cols, data, 0, 0, &write_event[1]);
+        sizeof(cl_int) * cols, new_data, 0, 0, &write_event[1]);
 
     clEnqueueWriteBuffer(cl.q(), d_outputBuffer, 1, 0,
         sizeof(cl_int) * 16384, h_outputBuffer, 0, 0, &write_event[2]);
@@ -278,7 +278,7 @@ int main(int argc, char** argv)
 	
 #ifdef BENCH_PRINT
 	for (int i = 0; i < cols; i++)
-		printf("%d ", data[i]);
+		printf("%d ", new_data[i]);
 	printf("\n");
 	for (int i = 0; i < cols; i++)
 		printf("%d ", result[i]);
@@ -299,7 +299,7 @@ int main(int argc, char** argv)
 #endif
 
 	// Memory cleanup here.
-	delete[] data;
+	delete[] new_data;
 	delete[] wall;
 	delete[] result;
 

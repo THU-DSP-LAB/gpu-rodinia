@@ -3,20 +3,11 @@ include ../../../common/make.config
 #Can be changed by `make TYPE=CPU`
 TYPE = GPU
 
-#Library
-ifeq ($(TYPE),GPU)
-	OPENCL_INC = $(NV_OPENCL_INC)
-	OPENCL_LIB = $(NV_OPENCL_LIB)
-else
-	OPENCL_INC = $(INTEL_OPENCL_INC)
-	OPENCL_LIB = $(INTEL_OPENCL_LIB)
-endif
-
 INC = -I$(OPENCL_INC) -I../common
 LIB = -L$(OPENCL_LIB)
 
 #C compiler
-CC = g++
+CC = clang++
 CC_FLAGS = -g -O3 -Wall
 
 EXE = lud.out

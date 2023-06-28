@@ -1,1 +1,1 @@
-./myocyte.out -time 500 -r /home/hyu/gpu-rodinia/data/myocyte
+./myocyte.out -time 500 -r ../../data/myocyte

@@ -71,7 +71,7 @@
 #include <limits.h>
 #include <math.h>
 #include <float.h>
-#include <omp.h>
+// #include <omp.h>
 #include "kmeans.h"
 
 float	min_rmse_ref = FLT_MAX;		
