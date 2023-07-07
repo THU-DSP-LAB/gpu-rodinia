@@ -13,7 +13,7 @@ Put it in the data directory.
 export PATH=your-path:$PATH
 export LD_LIBRARY_PATH=your-ld-library-path
 export POCL_DEVICES="ventus"
-export OCL_ICD_VENDOR=your-path-to-libpocl.so
+export OCL_ICD_VENDORS=your-path-to-libpocl.so
 ```
 
 ##### 1.2 modify environment variables
