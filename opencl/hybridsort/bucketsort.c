@@ -86,7 +86,7 @@ cl_kernel bucketsortKernel;
 cl_mem histoInput;
 cl_mem histoOutput;
 cl_mem bucketOutput;
-cl_int err;
+static cl_int err;
 cl_uint num_platforms;
 cl_event histoEvent;
 cl_event bucketCountEvent;

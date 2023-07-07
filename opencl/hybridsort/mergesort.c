@@ -31,7 +31,7 @@ cl_program mergeProgram;                 // compute program
 cl_kernel mergeFirstKernel;                   // compute kernel
 cl_kernel mergePassKernel;
 cl_kernel mergePackKernel;
-cl_int err;
+static cl_int err;
 cl_mem d_resultList_first_buff;
 cl_mem d_origList_first_buff;
 cl_mem constStartAddr;
