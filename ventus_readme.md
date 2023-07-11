@@ -7,6 +7,8 @@ Put it in the data directory.
 
 ### 1. Set environment variables
 
+Requirement: opencl version
+
 ##### 1.1 export environment variables
 
 ```
@@ -29,7 +31,7 @@ OPENCL_LIB = path-to-your-lib
 
 ### 2. Test suite running and building
 
-for each single case :
+##### 2.1 for each single case :
 
 | 序号	 | test-name | 构建命令 |  运行命令     |
 |----  |----  |----  |----  |
@@ -55,3 +57,8 @@ for each single case :
 |  20  | srad           |   make   |  ./run        |
 |  21  | streamcluster  |   make   |  ./run        |
 
+
+##### 2.2 for all cases :
+
+build: make OPENCL
+clean: make OCL_clean

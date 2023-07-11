@@ -4,11 +4,10 @@ RODINIA_BASE_DIR := $(shell pwd)
 
 CUDA_BIN_DIR := $(RODINIA_BASE_DIR)/bin/linux/cuda
 OMP_BIN_DIR := $(RODINIA_BASE_DIR)/bin/linux/omp
-OPENCL_BIN_DIR := $(RODINIA_BASE_DIR)/bin/linux/opencl
 
 CUDA_DIRS := backprop bfs cfd gaussian heartwall hotspot kmeans lavaMD leukocyte lud nn	nw srad streamcluster particlefilter pathfinder mummergpu
 OMP_DIRS  := backprop bfs cfd		   heartwall hotspot kmeans lavaMD leukocyte lud nn nw srad streamcluster particlefilter pathfinder mummergpu
-OCL_DIRS  := backprop bfs cfd gaussian heartwall hotspot kmeans lavaMD leukocyte lud nn	nw srad streamcluster particlefilter pathfinder
+OCL_DIRS  := backprop bfs b+tree cfd dwt2d gaussian heartwall hotspot hotspot3D hybridsort kmeans lavaMD leukocyte lud myocyte nn nw srad streamcluster particlefilter pathfinder
 
 all: CUDA OMP OPENCL
 
@@ -59,22 +58,23 @@ OPENCL:
 	cd opencl/bfs;				make;
 	cd opencl/b+tree;			make;
 	cd opencl/cfd;				make;
+	cd opencl/dwt2d;			make;
+	cd opencl/gaussian;			make;
+	cd opencl/heartwall;			make;
 	cd opencl/hotspot;			make;
+	cd opencl/hotspot3D;			make;
+	cd opencl/hybridsort;              	make;
 	cd opencl/kmeans;			make;
 	cd opencl/lavaMD;			make;
 	cd opencl/leukocyte;			make;
 	cd opencl/lud/ocl;			make;
 	cd opencl/myocyte;			make;
+	cd opencl/nn;				make;
 	cd opencl/nw;				make;
 	cd opencl/srad;				make;
 	cd opencl/streamcluster;		make;
 	cd opencl/pathfinder;			make;
 	cd opencl/particlefilter;		make;
-	cd opencl/gaussian;			make;
-	cd opencl/nn;				make;
-	cd opencl/heartwall;		        make;
-#	cd opencl/hybridsort;              	make;
-	cd opencl/dwt2d;                   	make;
 	
 clean: CUDA_clean OMP_clean OCL_clean
 
@@ -87,5 +87,4 @@ OMP_clean:
 	for dir in $(OMP_DIRS) ; do cd openmp/$$dir ; make clean ; cd ../.. ; done
 
 OCL_clean:
-	cd $(OPENCL_BIN_DIR); rm -f *
-	for dir in $(OCL_DIRS) ; do cd opencl/$$dir ; make clean ; cd ../.. ; done
+	for dir in $(OCL_DIRS) ; do cd opencl/$$dir ; make clean ; rm object.* test.data test.metadata ; cd ../.. ; done
