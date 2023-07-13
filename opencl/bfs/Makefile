@@ -31,7 +31,8 @@ debug: $(SRC)
 	$(CC) $(CC_FLAGS) $(SRC) -o $(EXE) -I$(OPENCL_INC) -L$(OPENCL_LIB) -lOpenCL 
 
 run:$(EXE)
-	./$(EXE) ../../data/bfs/graph1MW_6.txt -p 0 -d 0
+	./$(EXE) ../../data/bfs/graph4096.txt -p 0 -d 0
+	#./$(EXE) ../../data/bfs/graph1MW_6.txt -p 0 -d 0
 
 clean: $(SRC)
 	rm -f $(EXE) $(EXE).linkinfo result*

@@ -59,12 +59,24 @@ void compare_results(const datatype *cpu_results, const datatype *gpu_results, c
          passed = false; 
       }
     }
+
+    std::cout<<"cpu_results: ";
+    for (int i=0; i<size; i++)
+      std::cout<<" " <<cpu_results[i];
+    std::cout << endl;
+
+    std::cout<<"gpu_results: ";
+    for (int i=0; i<size; i++)
+      std::cout<<" " <<gpu_results[i];
+    std::cout << endl;
+
     if (passed){
         std::cout << "--cambine:passed:-)" << endl;
     }
     else{
         std::cout << "--cambine: failed:-(" << endl;
     }
+
     return ;
 }
 
