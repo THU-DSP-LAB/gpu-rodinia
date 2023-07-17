@@ -10,4 +10,4 @@ clean:
 run: lud
 	#./lud.out -i ../../data/lud/256.dat
 	#./lud.out -s 1024 -v
-	./lud.out -s 8192 -p 0 -d 0
+	./lud.out -v -i ../../data/lud/64.dat -p 0 -d 0

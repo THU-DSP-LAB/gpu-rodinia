@@ -415,7 +415,7 @@ int main(int argc, char **argv){
     clReleaseEvent(event[0]);
 #endif
 
-//#define TRACEBACK	
+#define TRACEBACK
 #ifdef TRACEBACK
 	
 	FILE *fpo = fopen("result.txt","w");

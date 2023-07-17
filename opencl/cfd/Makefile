@@ -24,7 +24,7 @@ res:$(SRC)
 	$(CC) $(KERNEL_DIM) $(SRC) -o $(EXE) -I$(OPENCL_INC) -L$(OPENCL_LIB)  -lOpenCL -D RES_MSG $(FLAGS)
 
 run:$(EXE)
-	./$(EXE) ../../data/cfd/missile.domn.0.2M -p 0 -d 0
+	./$(EXE) ../../data/cfd/fvcorr.domn.097K -p 0 -d 0
 
 clean: $(SRC)
 	rm -f $(EXE) $(EXE).linkinfo result*

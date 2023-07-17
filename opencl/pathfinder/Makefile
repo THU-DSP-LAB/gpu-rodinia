@@ -27,4 +27,4 @@ clean:
 	@rm -f pathfinder.out *.o *.out *~ *\#
 
 run: a.out
-	./pathfinder.out -c 100000 -r 100 -h 20 -p 0 -d 0 > result.txt
+	./pathfinder.out -c 100000 -r 100 -h 20 -p 0 -d 0 -v > result.txt

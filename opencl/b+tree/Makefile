@@ -51,7 +51,7 @@ b+tree.out:	./main.o \
 	                -o b+tree.out
 
 run: b+tree.out
-	./b+tree.out file ../../data/b+tree/mil.txt command ../../data/b+tree/command.txt -p 0 -d 0
+	./b+tree.out file ../../data/b+tree/mil.txt command ../../data/b+tree/command.txt -v -p 0 -d 0
 
 # ========================================================================================================================================================================================================200
 #	OBJECTS (COMPILE SOURCE FILES INTO OBJECTS)

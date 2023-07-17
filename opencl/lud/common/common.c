@@ -206,6 +206,25 @@ print_matrix(float *m, int matrix_dim) {
 }
 
 
+void
+print_matrix_verify(float *m, int matrix_dim) {
+    FILE *fp= fopen("output.txt", "w" );
+    if( fp == NULL )
+      printf( "The file was not opened\n" );
+
+    int i, j;
+    for (i=0; i<matrix_dim;i++) {
+      for (j=0; j<matrix_dim;j++) {
+        printf("%f ", m[i*matrix_dim+j]);
+        fprintf(fp, "%f ", m[i*matrix_dim+j]);
+      }
+      printf("\n");
+      fprintf(fp, "\n");
+    }
+    fclose(fp);
+}
+
+
 // Generate well-conditioned matrix internally  by Ke Wang 2013/08/07 22:20:06
 
 func_ret_t

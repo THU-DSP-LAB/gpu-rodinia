@@ -11,7 +11,7 @@ kmeans: cluster.o getopt.o read_input.o kmeans_clustering.o rmse.o
 	$(CC) $(KERNEL_DIM) $(CC_FLAGS) \
 		kmeans.cpp ../util/timing.c cluster.o getopt.o read_input.o kmeans_clustering.o rmse.o -o kmeans.out \
         -I$(OPENCL_INC) -L$(OPENCL_LIB) -lOpenCL \
-        -I../util -DTIMING
+        -I../util -DTIMING -g
 
 %.o: %.[ch]
 	$(CC) $(CC_FLAGS) $< -c

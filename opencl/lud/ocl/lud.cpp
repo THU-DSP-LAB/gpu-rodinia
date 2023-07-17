@@ -387,7 +387,7 @@ main ( int argc, char *argv[] )
 
 	if (do_verify){
 		printf("After LUD\n");
-		// print_matrix(m, matrix_dim);
+		print_matrix_verify(m, matrix_dim);
 		printf(">>>Verify<<<<\n");
 		lud_verify(mm, m, matrix_dim); 
 		free(mm);

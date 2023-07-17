@@ -58,6 +58,9 @@ matrix_duplicate(float *src, float **dst, int matrix_dim);
 void
 print_matrix(float *mm, int matrix_dim);
 
+void
+print_matrix_verify(float *mm, int matrix_dim);
+
 #ifdef __cplusplus
 }
 #endif
