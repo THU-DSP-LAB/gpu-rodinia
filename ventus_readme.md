@@ -1,4 +1,4 @@
-0. Modifications
+### 0. Modifications
 Please download the dataset from the [original package][data], or personal [Dropbox][dropbox] if the Virginia's link is down.
 Put it in the data directory.
 [data]: http://lava.cs.virginia.edu/Rodinia/download_links.htm
@@ -16,17 +16,7 @@ export PATH=your-path:$PATH
 export LD_LIBRARY_PATH=your-ld-library-path
 export POCL_DEVICES="ventus"
 export OCL_ICD_VENDORS=your-path-to-libpocl.so
-```
-
-##### 1.2 modify environment variables
-
-path: common/make.config
-
-```
- # DEFAULT OCL
-PENCL_DIR = path-to-your-ocl-icd
-OPENCL_INC = path-to-your-include
-OPENCL_LIB = path-to-your-lib
+export VENTUS_INSTALL_PREFIX=your-path-to-install
 ```
 
 ### 2. Test suite running and building

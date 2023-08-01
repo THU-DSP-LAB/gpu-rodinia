@@ -54,27 +54,27 @@ OMP:
 	cd openmp/mummergpu;				make;	cp bin/mummergpu $(OMP_BIN_DIR)
 
 OPENCL:
-	cd opencl/backprop;			make;
-	cd opencl/bfs;				make;
-	cd opencl/b+tree;			make;
-	cd opencl/cfd;				make;
-	cd opencl/dwt2d;			make;
-	cd opencl/gaussian;			make;
-	cd opencl/heartwall;			make;
-	cd opencl/hotspot;			make;
-	cd opencl/hotspot3D;			make;
-	cd opencl/hybridsort;              	make;
-	cd opencl/kmeans;			make;
-	cd opencl/lavaMD;			make;
-	cd opencl/leukocyte;			make;
-	cd opencl/lud/ocl;			make;
-	cd opencl/myocyte;			make;
-	cd opencl/nn;				make;
-	cd opencl/nw;				make;
-	cd opencl/srad;				make;
-	cd opencl/streamcluster;		make;
-	cd opencl/pathfinder;			make;
-	cd opencl/particlefilter;		make;
+#	cd opencl/backprop;			make;
+#	cd opencl/bfs;				make;
+#	cd opencl/b+tree;			make;
+#	cd opencl/cfd;				make;
+#	cd opencl/dwt2d;			make;
+	cd opencl/gaussian;			make;   ./run
+#	cd opencl/heartwall;			make;
+#	cd opencl/hotspot;			make;
+#	cd opencl/hotspot3D;			make;
+#	cd opencl/hybridsort;              	make;
+#	cd opencl/kmeans;			make;
+#	cd opencl/lavaMD;			make;
+#	cd opencl/leukocyte;			make;
+#	cd opencl/lud/ocl;			make;
+#	cd opencl/myocyte;			make;
+#	cd opencl/nn;				make;
+#	cd opencl/nw;				make;
+#	cd opencl/srad;				make;
+#	cd opencl/streamcluster;		make;
+#	cd opencl/pathfinder;			make;
+#	cd opencl/particlefilter;		make;
 	
 clean: CUDA_clean OMP_clean OCL_clean
 
