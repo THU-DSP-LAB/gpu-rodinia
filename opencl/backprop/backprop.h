@@ -5,7 +5,7 @@
 #define THREADS 256
 #define WIDTH 16  // shared memory width  
 #define HEIGHT 16 // shared memory height
-#define BLOCK_SIZE 16
+#define BLOCK_SIZE 4
 
 #define ETA 0.3       //eta value
 #define MOMENTUM 0.3  //momentum value

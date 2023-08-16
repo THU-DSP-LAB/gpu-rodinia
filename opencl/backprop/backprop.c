@@ -386,9 +386,9 @@ void bpnn_save(BPNN *net, char *filename)
   //write(fd, (char *) &n2, sizeof(int));
   //write(fd, (char *) &n3, sizeof(int));
 
-  fwrite( (char *) &n1 , sizeof(char), sizeof(char), pFile);
-  fwrite( (char *) &n2 , sizeof(char), sizeof(char), pFile);
-  fwrite( (char *) &n3 , sizeof(char), sizeof(char), pFile);
+  fwrite( (char *) &n1 , sizeof(char), sizeof(int), pFile);
+  fwrite( (char *) &n2 , sizeof(char), sizeof(int), pFile);
+  fwrite( (char *) &n3 , sizeof(char), sizeof(int), pFile);
 
   memcnt = 0;
   w = net->input_weights;

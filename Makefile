@@ -87,4 +87,4 @@ OMP_clean:
 	for dir in $(OMP_DIRS) ; do cd openmp/$$dir ; make clean ; cd ../.. ; done
 
 OCL_clean:
-	for dir in $(OCL_DIRS) ; do cd opencl/$$dir ; make clean ; rm object.* test.data test.metadata ; cd ../.. ; done
+	for dir in $(OCL_DIRS) ; do cd opencl/$$dir ; make clean ; rm object.* *.data *.metadata *.log; cd ../.. ; done

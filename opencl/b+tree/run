@@ -1,4 +1,5 @@
 #!/bin/bash
 
-export DATA_DIR=/home/hyu/Projects/gpu-rodinia/data
+DIR=$(cd "$(dirname "${0}")" &> /dev/null && (pwd -W 2> /dev/null || pwd))
+export DATA_DIR=${DIR}/../../data
 ./b+tree.out file ${DATA_DIR}/b+tree/mil.txt command ${DATA_DIR}/b+tree/command.txt $@

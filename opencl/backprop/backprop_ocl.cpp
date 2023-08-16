@@ -340,6 +340,30 @@ int bpnn_train_kernel(BPNN *net, float *eo, float *eh)
 	clReleaseMemObject(hidden_partial_sum);
 	clReleaseMemObject(input_prev_weights_ocl);
 
+	// bpnn_save(net, "save_res.txt");
+	// ********** compare the result **********
+	BPNN *new_net;
+	new_net = bpnn_read("save_res.txt");
+	int m2 = 0;
+	for (int k = 0; k <= in; k++) {
+		for (int j = 0; j <= hid; j++) {
+			if (input_weights_one_dim[m2] != new_net->input_weights[k][j]) {
+				printf("%d - right : %f; res : %f\n", m2, new_net->input_weights[k][j], input_weights_one_dim[m2]);
+				exit(1);
+			}
+			m2++;
+		}
+	}
+
+	for (int k = 0; k <= hid; k++) {
+		for (int j = 0; j <= out; j++) {
+			if (net->input_weights[k][j] != new_net->input_weights[k][j]) {
+				printf("%d-%d - right : %f; res : %f\n", k, j, new_net->input_weights[k][j], net->input_weights[k][j]);
+				exit(1);
+			}
+		}
+	}
+
 	free(input_weights_prev_one_dim);
 	free(partial_sum);
 	free(input_weights_one_dim);
@@ -361,4 +385,5 @@ int bpnn_train_kernel(BPNN *net, float *eo, float *eh)
 	printf("Close: %f\n", close_time);
 	printf("Total: %f\n", total_time);
 #endif
+	return 0;
 }

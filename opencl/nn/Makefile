@@ -22,4 +22,4 @@ clean:
 	rm -f $(EXE)
 
 run: release
-	./$(EXE) filelist.txt -p 0 -d 0 -r 50 -lat 30 -lng 90 -q -t ~/gpu-rodinia/data -p 0 -d 0
+	./$(EXE) filelist.txt -r 5 -lat 30 -lng 90 -t -f  ../../data -p 0 -d 0

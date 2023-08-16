@@ -5,13 +5,13 @@ TYPE = GPU
 
 # C compiler
 CC = clang++
-CC_FLAGS = -g -O2 
+CC_FLAGS = -g -O3 
 
 kmeans: cluster.o getopt.o read_input.o kmeans_clustering.o rmse.o
 	$(CC) $(KERNEL_DIM) $(CC_FLAGS) \
 		kmeans.cpp ../util/timing.c cluster.o getopt.o read_input.o kmeans_clustering.o rmse.o -o kmeans.out \
         -I$(OPENCL_INC) -L$(OPENCL_LIB) -lOpenCL \
-        -I../util -DTIMING -g
+        -I../util -g
 
 %.o: %.[ch]
 	$(CC) $(CC_FLAGS) $< -c
