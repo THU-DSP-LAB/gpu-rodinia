@@ -14,7 +14,7 @@ Requirement: opencl version
 ```
 export PATH=your-path:$PATH
 export LD_LIBRARY_PATH=your-ld-library-path
-export POCL_DEVICES="ventus"
+export POCL_DEVICES="your-device"
 export OCL_ICD_VENDORS=your-path-to-libpocl.so
 export VENTUS_INSTALL_PREFIX=your-path-to-install
 ```
