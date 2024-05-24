@@ -244,7 +244,7 @@ int main(int argc, char * argv[])
         char *input_f;
         if(argc < 2) {
             Usage(argc, argv);
-            exit(0);
+            exit(1);
         }
 
         _clCmdParams(argc, argv);
@@ -254,7 +254,7 @@ int main(int argc, char * argv[])
         fp = fopen(input_f,"r");
         if(!fp) {
             printf("Error Reading graph file\n");
-            return 0;
+            exit(1);
         }
 
         int source = 0;

@@ -11,12 +11,21 @@ Requirement: opencl version
 
 ##### 1.1 export environment variables
 
+* For ventus-gpgpu, you can directly use the following command:
+
 ```
-export PATH=your-path:$PATH
-export LD_LIBRARY_PATH=your-ld-library-path
-export POCL_DEVICES="your-device"
-export OCL_ICD_VENDORS=your-path-to-libpocl.so
 export VENTUS_INSTALL_PREFIX=your-path-to-install
+bash run-rodinia-with-ventus.sh
+
+```
+* If you need to use another architecture, here is the general way:
+
+```
+export VENTUS_INSTALL_PREFIX=your-path-to-install
+export PATH=${VENTUS_INSTALL_PREFIX}/bin:$PATH
+export LD_LIBRARY_PATH=${VENTUS_INSTALL_PREFIX}/lib
+export POCL_DEVICES="your-device"
+export OCL_ICD_VENDORS=${VENTUS_INSTALL_PREFIX}/lib/libpocl.so
 ```
 
 ### 2. Test suite running and building

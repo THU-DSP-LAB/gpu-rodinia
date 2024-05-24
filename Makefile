@@ -54,28 +54,28 @@ OMP:
 	cd openmp/mummergpu;				make;	cp bin/mummergpu $(OMP_BIN_DIR)
 
 OPENCL:
-#	cd opencl/backprop;			make;
-#	cd opencl/bfs;				make;
-#	cd opencl/b+tree;			make;
-#	cd opencl/cfd;				make;
-#	cd opencl/dwt2d;			make;
-	cd opencl/gaussian;			make;   ./run
-#	cd opencl/heartwall;			make;
-#	cd opencl/hotspot;			make;
-#	cd opencl/hotspot3D;			make;
-#	cd opencl/hybridsort;              	make;
-#	cd opencl/kmeans;			make;
-#	cd opencl/lavaMD;			make;
-#	cd opencl/leukocyte;			make;
-#	cd opencl/lud/ocl;			make;
-#	cd opencl/myocyte;			make;
-#	cd opencl/nn;				make;
-#	cd opencl/nw;				make;
-#	cd opencl/srad;				make;
-#	cd opencl/streamcluster;		make;
-#	cd opencl/pathfinder;			make;
-#	cd opencl/particlefilter;		make;
-	
+	cd ${RODINIA_BASE_DIR}/opencl/bfs;			make;	make run
+#	cd ${RODINIA_BASE_DIR}/opencl/backprop;			make;   make run
+#	cd ${RODINIA_BASE_DIR}/opencl/b+tree;			make;   make run
+#	cd ${RODINIA_BASE_DIR}/opencl/cfd;			make;   make run
+#	cd ${RODINIA_BASE_DIR}/opencl/dwt2d;			make;   ./run
+	cd ${RODINIA_BASE_DIR}/opencl/gaussian;			make;	./run
+#	cd ${RODINIA_BASE_DIR}/opencl/heartwall;		make;   make run
+#	cd ${RODINIA_BASE_DIR}/opencl/hotspot;			make;   ./run
+#	cd ${RODINIA_BASE_DIR}/opencl/hotspot3D;		make;   ./run
+#	cd ${RODINIA_BASE_DIR}/opencl/hybridsort;              	make;   ./run
+#	cd ${RODINIA_BASE_DIR}/opencl/kmeans;			make;   ./run
+#	cd ${RODINIA_BASE_DIR}/opencl/lavaMD;			make;   ./run
+#	cd ${RODINIA_BASE_DIR}/opencl/leukocyte;		make;   ./run
+#	cd ${RODINIA_BASE_DIR}/opencl/lud/ocl;			make;   make run
+#	cd ${RODINIA_BASE_DIR}/opencl/myocyte;			make;   ./run
+#	cd ${RODINIA_BASE_DIR}/opencl/nn;			make;   ./run
+#	cd ${RODINIA_BASE_DIR}/opencl/nw;			make;   ./run
+#	cd ${RODINIA_BASE_DIR}/opencl/srad;			make;   ./run
+#	cd ${RODINIA_BASE_DIR}/opencl/streamcluster;		make;   ./run
+#	cd ${RODINIA_BASE_DIR}/opencl/pathfinder;		make;   make run
+#	cd ${RODINIA_BASE_DIR}/opencl/particlefilter;		make;   ./run
+
 clean: CUDA_clean OMP_clean OCL_clean
 
 CUDA_clean:
@@ -87,4 +87,4 @@ OMP_clean:
 	for dir in $(OMP_DIRS) ; do cd openmp/$$dir ; make clean ; cd ../.. ; done
 
 OCL_clean:
-	for dir in $(OCL_DIRS) ; do cd opencl/$$dir ; make clean ; rm object.* *.data *.metadata *.log; cd ../.. ; done
+	for dir in $(OCL_DIRS) ; do cd ${RODINIA_BASE_DIR}/opencl/$$dir ; make clean ; rm object.* *.data *.metadata *.log; cd ../.. ; done
