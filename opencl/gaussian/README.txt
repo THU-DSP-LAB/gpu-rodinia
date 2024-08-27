@@ -52,7 +52,8 @@ Gaussian Elimination Usage
     
     -p [int]     Choose the platform (must choose both platform and device)
     -d [int]     Choose the device (must choose both platform and device)
-    
+    -c           Compare the result to a precomputed result
+    -e           Create a counterpart standard result file with the result this version calculated
     
     Notes: 1. The filename is required as the first parameter.
            2. If you declare either the device or the platform,
@@ -66,3 +67,7 @@ The actually dimension = RD_WG_SIZE_1_0 * RD_WG_SIZE_1_1
 USAGE:
 make clean
 make KERNEL_DIM="-DRD_WG_SIZE_0=16 -DRD_WG_SIZE_1_0=16 -DRD_WG_SIZE_1_1=16"
+
+****** Compare ******
+For now, compare function only supports certain testcase in data folder. 
+If you want to use '-c', please ensure to use '-f' and specify one of the testcase in data/gaussian.

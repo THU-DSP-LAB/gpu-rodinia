@@ -24,7 +24,7 @@ float *OpenClGaussianElimination(
 
 void printUsage();
 int parseCommandline(int argc, char *argv[], char* filename,
-                     int *q, int *v, int *t, int *p, int *d, int *size);
+                     int *q, int *v, int *t, int *p, int *d, int *c, int *e, int *size);
 
 void InitPerRun(int size,float *m);
 void ForwardSub(cl_context context, float *a, float *b, float *m, int size,int timing);
@@ -34,7 +34,10 @@ void Fan2(float *m, float *a, float *b,int Size, int j1, int t);
 //void Fan3(float *m, float *b, int Size, int t);
 void InitMat(FILE *fp, int size, float *ary, int nrow, int ncol);
 void InitAry(FILE *fp, float *ary, int ary_size);
+void ReadAry(FILE *fp, float *ary, int ary_size);
 void PrintMat(float *ary, int size, int nrow, int ncolumn);
 void PrintAry(float *ary, int ary_size);
-float eventTime(cl_event event,cl_command_queue command_queue);
+void PrintAryToFile(float *ary, int ary_size, FILE *fp);
+void PrintMatToFile(float *ary, int size, int nrow, int ncol, FILE *fp);
+float eventTime(cl_event event, cl_command_queue command_queue);
 #endif

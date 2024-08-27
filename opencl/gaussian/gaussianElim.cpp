@@ -92,13 +92,13 @@ int main(int argc, char *argv[]) {
     
     // args
     char filename[200];
-    int show_data=0,quiet=0,timing=0,platform=0,device=0;
+    int show_data=0,quiet=0,timing=0,platform=0,device=0,compare=0,createCompareFile=0;
     
     // parse command line
     if (parseCommandline(argc, argv, filename,
-			 &quiet, &show_data, &timing, &platform, &device, &size)) {
+			 &quiet, &show_data, &timing, &platform, &device, &compare, &createCompareFile, &size)) {
     printUsage();
-    return 0;
+    exit(1);
     }
 
 #ifdef  TIMING
@@ -111,6 +111,25 @@ int main(int argc, char *argv[]) {
 	init_time = tv.tv_sec * 1000.0 + (float) tv.tv_usec / 1000.0;
 #endif
 
+  char resname[200] = "result/";
+  char resfile_suffix[20] = "_result.txt";
+  if (compare) {
+    if(size < 1)
+      {
+        int i = strlen(filename);
+        while (filename[i] != '/')
+          i--;
+        i++;
+        strcat(resname, filename + i);
+        i = strlen(resname);
+        strcpy(resname + i - 4, resfile_suffix);
+      }
+    else
+      {
+        printf("compare is set, but testcase is randomly generated, can't compare\n");
+        exit(1);// 如果是随机生成的测例，需要cpu版本的ventus临时生成结果文件，目前不支持
+      }
+  }
     if(size < 1)
     {
 	fp = fopen(filename, "r");
@@ -157,6 +176,7 @@ int main(int argc, char *argv[]) {
 
     // run kernels
 	ForwardSub(context,a,b,m,size,timing);
+  BackSub(a,b,finalVec,size);
 
     if (!quiet && show_data) {
         printf("The result of matrix m is: \n");
@@ -167,9 +187,43 @@ int main(int argc, char *argv[]) {
         printf("The result of array b is: \n");
         PrintAry(b, size);
 
-        BackSub(a,b,finalVec,size);
         printf("The final solution is: \n");
         PrintAry(finalVec,size);
+    }
+
+    if (createCompareFile)
+    {
+        FILE *fpw = fopen(resname, "w");
+        if (fpw == NULL) {
+            printf("Error: unable to open file %s\n", resname);
+            exit(1);
+        }
+        PrintAryToFile(finalVec, size, fpw);
+        fclose(fpw);
+    }
+
+
+    if (compare) // ensure precomputed result is available
+    {
+        float *compareVec = (float *) malloc(size * sizeof(float));
+        FILE *fpr = fopen(resname, "r");
+        if (fpr == NULL) {
+            printf("Error: unable to open file %s\n", resname);
+            exit(1);
+        }
+        ReadAry(fpr, compareVec, size);
+        fclose(fpr);
+
+        int i;
+        for (i = 0; i < size; i++) {
+            if (fabs((compareVec[i] - finalVec[i])/compareVec[i]) > 1e-6) {
+                float err = fabs(compareVec[i] - finalVec[i]);
+                printf("Error: finalVec[%d] = %e, while compareVec[%d] = %e, err = %e\n", i, finalVec[i], i, compareVec[i], err);
+                exit(1);
+            }
+        }
+        printf("Gaussian test passed\n");
+        free(compareVec);
     }
 
     free(m);
@@ -457,7 +511,7 @@ float eventTime(cl_event event,cl_command_queue command_queue){
 
  // Ke Wang add a function to generate input internally
 int parseCommandline(int argc, char *argv[], char* filename,
-                     int *q, int *v, int *t, int *p, int *d, int *size){
+                     int *q, int *v, int *t, int *p, int *d, int *c, int *e, int *size){
     int i;
     if (argc < 2) return 1; // error
     char flag;
@@ -482,9 +536,9 @@ int parseCommandline(int argc, char *argv[], char* filename,
             case 'q': // quiet
               *q = 1;
               break;
-			case 'v': // show_data
-			  *v = 1;
-			  break;
+            case 'v': // show_data
+              *v = 1;
+              break;
             case 't': // timing
               *t = 1;
               break;
@@ -495,6 +549,12 @@ int parseCommandline(int argc, char *argv[], char* filename,
             case 'd': // device
               i++;
               *d = atoi(argv[i]);
+              break;
+            case 'c': // compare
+              *c = 1;
+              break;
+            case 'e': //create compare file
+              *e = 1;
               break;
         }
       }
@@ -520,6 +580,8 @@ void printUsage(){
   printf("\n");
   printf("-p [int]     Choose the platform (must choose both platform and device)\n");
   printf("-d [int]     Choose the device (must choose both platform and device)\n");
+  printf("-c           Compare the result to a precomputed result\n");
+  printf("-e           Create a counterpart standard result file with the result this version calculated\n");
   printf("\n");
   printf("\n");
   printf("Notes: 1. The filename is required as the first parameter.\n");
@@ -575,6 +637,15 @@ void InitAry(FILE *fp, float *ary, int ary_size)
 		fscanf(fp, "%f",  &ary[i]);
 	}
 }  
+
+void ReadAry(FILE *fp, float *ary, int ary_size)
+{
+  int i;
+
+  for (i=0; i<ary_size; i++) {
+    fscanf(fp, "%e", &ary[i]);
+  }
+}
 /*------------------------------------------------------
  ** PrintMat() -- Print the contents of the matrix
  **------------------------------------------------------
@@ -604,5 +675,26 @@ void PrintAry(float *ary, int ary_size)
 	}
 	printf("\n\n");
 }
+
+void PrintAryToFile(float *ary, int ary_size, FILE *fp)
+{
+  int i;
+  for (i=0; i<ary_size; i++) {
+    fprintf(fp, "%e ", ary[i]);
+  }
+}
+
+void PrintMatToFile(float *ary, int size, int nrow, int ncol, FILE *fp)
+{
+  int i, j;
+  for (i=0; i<nrow; i++) {
+    for (j=0; j<ncol; j++) {
+      fprintf(fp, "%e ", *(ary+size*i+j));
+    }
+    fprintf(fp, "\n");
+  }
+  fprintf(fp, "\n");
+}
+
 #endif
 
