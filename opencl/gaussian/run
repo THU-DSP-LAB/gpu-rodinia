@@ -1,4 +1,5 @@
 #!/bin/bash
 
 # ./gaussian.out -s 2048 $@
-./gaussian.out -p 0 -d 0 -f ../../data/gaussian/matrix4.txt -v
+#./gaussian.out -p 0 -d 0 -f ../../data/gaussian/matrix4.txt -v
+./gaussian.out -p 0 -d 0 -f ../../data/gaussian/matrix16.txt -v

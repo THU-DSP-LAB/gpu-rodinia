@@ -8,6 +8,8 @@
  */
 
 // #include <omp.h>
+#include <cerrno>
+#include <cstring>
 #include <stdio.h>
 #include <stdlib.h>
 #include "backprop.h"
@@ -401,7 +403,7 @@ void bpnn_save(BPNN *net, char *filename)
     }
   }
   //write(fd, mem, (n1+1) * (n2+1) * sizeof(float));
-  fwrite( mem , (unsigned)(sizeof(float)), (unsigned) ((n1+1) * (n2+1) * sizeof(float)) , pFile);
+  fwrite( mem , (unsigned)(sizeof(float)), (unsigned) ((n1+1) * (n2+1)) , pFile);
   free(mem);
 
   memcnt = 0;
@@ -415,7 +417,7 @@ void bpnn_save(BPNN *net, char *filename)
     }
   }
   //write(fd, mem, (n2+1) * (n3+1) * sizeof(float));
-  fwrite( mem , sizeof(float), (unsigned) ((n2+1) * (n3+1) * sizeof(float)) , pFile);
+  fwrite( mem , sizeof(float), (unsigned) ((n2+1) * (n3+1)) , pFile);
   free(mem);
 
   fclose(pFile);
@@ -430,6 +432,7 @@ BPNN *bpnn_read(char *filename)
   int fd, n1, n2, n3, i, j, memcnt;
 
   if ((fd = open(filename, 0, 0644)) == -1) {
+    fprintf(stderr, "BPNN_READ: Cannot open '%s' because %s\n", filename, strerror(errno));
     return (NULL);
   }
 

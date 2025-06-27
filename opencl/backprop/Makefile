@@ -4,10 +4,10 @@ include ../../common/make.config
 TYPE = GPU
 
 # C compiler
-CC = clang++
-CC_FLAGS = -g -O2 -std=c++11
+CC = g++
+CC_FLAGS = -g -std=c++11
 
-backprop.out: backprop.o imagenet.o facetrain.o
+backprop.out: backprop.o imagenet.o facetrain.o backprop_ocl.cpp ../util/timing.c
 	$(CC) $(CC_FLAGS) backprop_ocl.cpp ../util/timing.c backprop.o imagenet.o facetrain.o -o backprop.out -I$(OPENCL_INC) -L$(OPENCL_LIB) -lOpenCL -I../util -DTIMING -Wno-unused-result
 
 %.o: %.[ch]
