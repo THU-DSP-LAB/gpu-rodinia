@@ -3,6 +3,10 @@
 
 #include "nearestNeighbor.h"
 #include "timing.h"
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 #ifdef TIMING
 #define PROFILING
@@ -19,6 +23,25 @@ float init_time = 0, mem_alloc_time = 0, h2d_time = 0, kernel_time = 0,
       d2h_time = 0, close_time = 0, total_time = 0;
 #endif
 char *data_folder;
+
+static char ref_filename[256] = {0};
+static char export_filename[256] = {0};
+int save_result(const char *filename, const float *distance, int resultsCount, float lat, float lng);
+std::tuple<LatLong, std::vector<float>> load_result(const char *filename);
+
+bool almost_equal(
+    float a, float b, 
+    float abs_tol = 1e-6f,
+    float rel_tol = 1e-5f
+) {
+    auto diff = std::abs(a - b);
+    if (diff < abs_tol) {
+        return true;
+    }
+    // 相对误差：diff / max(|a|, |b|)
+    auto max_ab = std::max(std::abs(a), std::abs(b));
+    return diff < rel_tol * max_ab;
+}
 
 cl_context context=NULL;
 
@@ -65,6 +88,40 @@ int main(int argc, char *argv[]) {
 
   recordDistances = OpenClFindNearestNeighbors(context,numRecords,locations,lat,lng,timing);
 
+  if (export_filename[0] != '\0') {
+    if (save_result(export_filename, recordDistances, numRecords, lat, lng) != 0) {
+      fprintf(stderr, "Error saving results to %s\n", export_filename);
+      return -1;
+    }
+    if (!quiet) printf("Results saved to %s, length = %d\n", export_filename, numRecords);
+  }
+  if (ref_filename[0] != '\0') {
+    LatLong refPos;
+    std::vector<float> refDistances;
+    std::tie(refPos, refDistances) = load_result(ref_filename);
+    if (refDistances.empty()) {
+      fprintf(stderr, "Error loading reference results from %s\n", ref_filename);
+      exit(EXIT_FAILURE);
+    }
+    if (refDistances.size() != numRecords || lat != refPos.lat || lng != refPos.lng) {
+      fprintf(stderr, "Reference result metadata mismatch with this testcase: \n"
+        "Expected: length=%d, lat=%f, lng=%f\n"
+        "Got from %s: length=%lu, lat=%f, lng=%f\n",
+        numRecords, lat, lng, ref_filename, refDistances.size(), refPos.lat, refPos.lng
+      );
+      exit(EXIT_FAILURE);
+    }
+    if (!quiet) printf("Reference results loaded from %s, length = %lu\n", ref_filename, refDistances.size());
+    // Compare the distances
+    for (i = 0; i < numRecords; i++) {
+      if (!almost_equal(recordDistances[i], refDistances[i])) {
+        fprintf(stderr, "Distance mismatch at index %d: computed = %f, reference = %f\n",
+                i, recordDistances[i], refDistances[i]);
+        exit(EXIT_FAILURE);
+      }
+    }
+  }
+
   // find the resultsCount least distances
   findLowest(records,recordDistances,numRecords,resultsCount);
 
@@ -73,6 +130,9 @@ int main(int argc, char *argv[]) {
     for(i=0;i<resultsCount;i++) {
       printf("%s --> Distance=%f\n",records[i].recString,records[i].distance);
     }
+  if (!quiet && ref_filename[0] != '\0') {
+    printf("Testcase results match reference result, \033[32mOK\033[0m.\n");
+  }
   free(recordDistances);
   return 0;
 }
@@ -254,13 +314,13 @@ int loadData(char *filename,std::vector<Record> &records,std::vector<LatLong> &l
 		*/
 		if(fscanf(flist, "%s\n", dbname) != 1) {
             fprintf(stderr, "error reading filelist\n");
-            exit(0);
+            exit(EXIT_FAILURE);
         }
         sprintf(db_fullname, "%s/%s", data_folder, dbname);
         fp = fopen(db_fullname, "r");
         if(!fp) {
             printf("error opening a db (%s)\n", db_fullname);
-            exit(1);
+            exit(EXIT_FAILURE);
         }
         // read each record
         while(!feof(fp)){
@@ -285,7 +345,7 @@ int loadData(char *filename,std::vector<Record> &records,std::vector<LatLong> &l
             records.push_back(record);
             recNum++;
 	   
-	          if(recNum>=16)break;
+	          // if(recNum>=16)break;
         }
         fclose(fp);
     }
@@ -328,7 +388,11 @@ int parseCommandline(int argc, char *argv[], char* filename,int *r,float *lat,fl
     char flag;
     
     for(i=1;i<argc;i++) {
-      if (argv[i][0]=='-') {// flag
+      if (std::strcmp(argv[i], "--ref") == 0) {
+        strncpy(ref_filename, argv[++i], sizeof(ref_filename)-10);
+      } else if (std::strcmp(argv[i], "--export") == 0) {
+        strncpy(export_filename, argv[++i], sizeof(export_filename)-10);
+      } else if (argv[i][0]=='-') { // flag
         flag = argv[i][1];
           switch (flag) {
             case 'r': // number of results
@@ -397,6 +461,37 @@ void printUsage(){
   printf("Notes: 1. The filename is required as the first parameter.\n");
   printf("       2. If you declare either the device or the platform,\n");
   printf("          you must declare both.\n\n");
+}
+
+int save_result(const char *filename, const float *distance, int resultsCount, float lat, float lng) {
+  FILE *fp = fopen(filename, "w");
+  if (!fp) {
+    fprintf(stderr, "Error opening file %s for writing: %s\n", filename, strerror(errno));
+    return -1;
+  }
+  fwrite(&resultsCount, sizeof(int), 1, fp);
+  fwrite(&lat, sizeof(int), 1, fp);
+  fwrite(&lng, sizeof(int), 1, fp);
+  fwrite(distance, sizeof(float), resultsCount, fp);
+  fclose(fp);
+  return 0;
+}
+std::tuple<LatLong, std::vector<float>> load_result(const char *filename) {
+  std::vector<float> distances;
+  int size = 0;
+  LatLong pos;
+  FILE *fp = fopen(filename, "r");
+  if (!fp) {
+    fprintf(stderr, "Error opening file %s: %s\n", filename, strerror(errno));
+    return std::make_tuple(pos, distances); // return empty vector
+  }
+  fread(&size, sizeof(int), 1, fp);
+  fread(&pos.lat, sizeof(float), 1, fp);
+  fread(&pos.lng, sizeof(float), 1, fp);
+  distances.resize(size);
+  fread(distances.data(), sizeof(float), size, fp);
+  fclose(fp);
+  return std::make_tuple(pos, distances);
 }
 
 #endif
