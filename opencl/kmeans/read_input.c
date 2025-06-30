@@ -68,6 +68,8 @@
 /**					calculate root mean squared error.					**/
 /**                                                                     **/
 /*************************************************************************/
+#include <cerrno>
+#include <cstdlib>
 #define _CRT_SECURE_NO_DEPRECATE 1
 
 #include <stdio.h>
@@ -84,10 +86,23 @@ extern double wtime(void);
 extern int platform_id_inuse;     // platform id in use (default: 0)
 extern int device_id_inuse;       //device id in use (default : 0)
 
+bool almost_equal(
+    float a, float b, 
+    float abs_tol = 1e-6f,
+    float rel_tol = 1e-5f
+) {
+    auto diff = std::abs(a - b);
+    if (diff < abs_tol) {
+        return true;
+    }
+    // 相对误差：diff / max(|a|, |b|)
+    auto max_ab = std::max(std::abs(a), std::abs(b));
+    return diff < rel_tol * max_ab;
+}
 
 /*---< usage() >------------------------------------------------------------*/
 void usage(char *argv0) {
-    char *help =
+    const char *help =
         "\nUsage: %s [switches] -i filename\n\n"
 		"    -i filename      :file containing data to be clustered\n"		
 		"    -m max_nclusters :maximum number of clusters allowed    [default=5]\n"
@@ -129,8 +144,11 @@ int setup(int argc, char **argv) {
 		int		isOutput = 0;
 		//float	cluster_timing, io_timing;		
 
+		char ref_filename[1024] = {0};
+		char export_filename[1024] = {0};
+
 		/* obtain command line arguments and change appropriate options */
-		while ( (opt=getopt(argc,argv,"i:t:m:n:l:p:d:bro"))!= EOF) {
+		while ( (opt=getopt(argc,argv,"i:t:m:n:l:p:d:broe:g:"))!= EOF) {
         switch (opt) {
             case 'i': filename=optarg;
                       break;
@@ -152,6 +170,12 @@ int setup(int argc, char **argv) {
                       break;
 		    case 'd': device_id_inuse = atoi(optarg);
                       break;
+			case 'e': strncpy(export_filename, optarg, 1023);
+				      isRMSE = 1;
+					  break;
+			case 'g': strncpy(ref_filename, optarg, 1023);
+				      isRMSE = 1;
+					  break;
             case '?': usage(argv[0]);
                       break;
             default: usage(argv[0]);
@@ -301,6 +325,64 @@ int setup(int argc, char **argv) {
 				printf("Root Mean Squared Error: %.3f\n", rmse);
 		}
 	}
+
+	if(export_filename[0] != 0) {
+		FILE *fp = fopen(export_filename, "w");
+		if (fp == NULL) {
+			fprintf(stderr, "Error: cannot open file %s for writing: %s\n", export_filename, strerror(errno));
+			exit(EXIT_FAILURE);
+		}
+		fwrite(&best_nclusters, sizeof(best_nclusters), 1, fp);
+		fwrite(&nfeatures, sizeof(nfeatures), 1, fp);
+		fwrite(&rmse, sizeof(rmse), 1, fp);
+		fwrite(cluster_centres[0], sizeof(float), best_nclusters*nfeatures, fp);
+		fclose(fp);
+		printf("Result written to %s\n", export_filename);
+	}
+	if(ref_filename[0] != 0) {
+		FILE *fp = fopen(ref_filename, "r");
+		if (fp == NULL) {
+			fprintf(stderr, "Error: cannot open reference file %s: %s\n", ref_filename, strerror(errno));
+			exit(EXIT_FAILURE);
+		}
+		int ref_nclusters = 0, ref_nfeatures = 0;
+		float ref_rmse = FLT_MAX;
+		fread(&ref_nclusters, sizeof(ref_nclusters), 1, fp);
+		fread(&ref_nfeatures, sizeof(ref_nfeatures), 1, fp);
+		fread(&ref_rmse, sizeof(ref_rmse), 1, fp);
+		float *ref_cluster_centres = (float *)malloc(ref_nclusters * ref_nfeatures * sizeof(float));
+		fread(ref_cluster_centres, sizeof(float), ref_nclusters * ref_nfeatures, fp);
+		if(ref_nclusters != best_nclusters || ref_nfeatures != nfeatures) {
+			fprintf(stderr, "Error: reference file %s has different dimensions (%d clusters, %d features) than expected (%d clusters, %d features)\n",
+					ref_filename, ref_nclusters, ref_nfeatures, best_nclusters, nfeatures);
+			free(ref_cluster_centres);
+			fclose(fp);
+			exit(EXIT_FAILURE);
+		}
+		if(!almost_equal(ref_rmse, rmse)) {
+			fprintf(stderr, "Error: RMSE mismatch in reference file %s: REF=%g, DUT=%g\n",
+					ref_filename, ref_rmse, rmse);
+			free(ref_cluster_centres);
+			fclose(fp);
+			exit(EXIT_FAILURE);
+		}
+		for(int i = 0; i < best_nclusters; i++) {
+			for(int j = 0; j < nfeatures; j++) {
+				if(!almost_equal(ref_cluster_centres[i * nfeatures + j], cluster_centres[i][j])) {
+					fprintf(stderr, "Error: cluster centre mismatch in reference file %s at cluster %d, feature %d: REF=%g, DUT=%g\n",
+							ref_filename, i, j, ref_cluster_centres[i * nfeatures + j], cluster_centres[i][j]);
+					free(ref_cluster_centres);
+					fclose(fp);
+					exit(EXIT_FAILURE);
+				}
+			}
+		}
+		free(ref_cluster_centres);
+		fclose(fp);
+		printf("DUT result matches reference file %s, OK.\n", ref_filename);
+	}
+
+	/* free up memory */
 	
 
 	/* free up memory */
