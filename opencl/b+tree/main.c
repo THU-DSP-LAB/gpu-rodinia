@@ -63,6 +63,10 @@
 #include <math.h>									// (in directory known to compiler)			needed by log, pow
 #include <string.h>									// (in directory known to compiler)			needed by memset
 #include <CL/cl.h>
+#include <sys/mman.h>                               // (in directory known to compiler)           needed by mmap, munmap
+#include <fcntl.h>                                  // (in directory known to compiler)           needed by open
+#include <unistd.h>                                 // (in directory known to compiler)           needed by close
+#include <sys/stat.h>                               // (in directory known to compiler)           needed by fstat
 
 //======================================================================================================================================================150
 //	COMMON
@@ -1852,7 +1856,7 @@ int
 main(	int argc, 
 		char** argv ) 
 {
-
+  unsigned int rand_seed = 10086;
   printf("WG size of kernel 1 = %d WG size of kernel 2 = %d \n", DEFAULT_ORDER, DEFAULT_ORDER_2);
 	// ------------------------------------------------------------60
 	// figure out and display whether 32-bit or 64-bit architecture
@@ -1879,6 +1883,7 @@ main(	int argc,
 	char *command_file = NULL;
 	char *output="output.txt";
 	FILE * pFile;
+	char reference_file[256] = {0};
 
 	// go through arguments
 	for(cur_arg=1; cur_arg<argc; cur_arg++){
@@ -1909,28 +1914,37 @@ main(	int argc,
 	      return -1;
 	    }
 	  }
-      else if (strcmp(argv[cur_arg], "-p") == 0) {
-        // check if value provided
-        if (argc >= cur_arg + 1) {
-            platform_id_inuse = atoi(argv[cur_arg + 1]);
-            cur_arg = cur_arg + 1;
+	  else if (strcmp(argv[cur_arg], "-p") == 0) {
+	    // check if value provided
+	    if (argc >= cur_arg + 1) {
+	        platform_id_inuse = atoi(argv[cur_arg + 1]);
+	        cur_arg = cur_arg + 1;
 	    }
 	    else {
 	      printf("ERROR: Missing value to platform parameter\n");
 	      return -1;
 	    }
-      }
-      else if (strcmp(argv[cur_arg], "-d") == 0) {
-        // check if value provided
-        if (argc >= cur_arg + 1) {
-            device_id_inuse = atoi(argv[cur_arg + 1]);
-            cur_arg = cur_arg + 1;
+	  }
+	  else if (strcmp(argv[cur_arg], "-d") == 0) {
+	    // check if value provided
+	    if (argc >= cur_arg + 1) {
+	        device_id_inuse = atoi(argv[cur_arg + 1]);
+	        cur_arg = cur_arg + 1;
 	    }
 	    else {
 	      printf("ERROR: Missing value to device parameter\n");
 	      return -1;
 	    }
-      }
+      } else if (strcmp(argv[cur_arg], "--ref") == 0) {
+		// check if value provided
+		if (argc >= cur_arg + 1) {
+			snprintf(reference_file, sizeof(reference_file), "%s", argv[cur_arg + 1]);
+			cur_arg = cur_arg + 1;
+		} else {
+		  printf("ERROR: Missing value to --ref parameter\n");
+		  return -1;
+		}
+	  }
       /*
       else if (strcmp(argv[cur_arg], "-t") == 0) {
         // check if value provided
@@ -1970,7 +1984,7 @@ main(	int argc,
      rewind (commandFile);
 
      // allocate memory to contain the whole file:
-     commandBuffer = (char*) malloc (sizeof(char)*lSize);
+     commandBuffer = (char*) malloc (sizeof(char)*lSize + 1);
      if (commandBuffer == NULL) {fputs ("Command Buffer memory error",stderr); exit (2);}
      commandBuffer[lSize] = '\0';
 
@@ -2218,7 +2232,7 @@ main(	int argc,
 				// INPUT: keys CPU initialization
 				int i;
 				for(i = 0; i < count; i++){
-					keys[i] = (rand()/(float)RAND_MAX)*size;
+					keys[i] = (rand_r(&rand_seed)/(float)RAND_MAX)*size;
 				}
 
 				// OUTPUT: ans CPU allocation
@@ -2355,7 +2369,7 @@ main(	int argc,
 				// INPUT: start, end CPU initialization
 				int i;
 				for(i = 0; i < count; i++){
-					start[i] = (rand()/(float)RAND_MAX)*size;
+					start[i] = (rand_r(&rand_seed)/(float)RAND_MAX)*size;
 					end[i] = start[i]+rSize;
 					if(end[i] >= size){ 
 						start[i] = start[i] - (end[i] - size);
@@ -2443,9 +2457,72 @@ main(	int argc,
 	// free remaining memory and exit
 	// ------------------------------------------------------------60
 
+	if (reference_file[0] != 0) {
+		printf("Validating against reference file %s...\n", reference_file);
+		extern int compare_files(const char *file1, const char *file2);
+		if (compare_files(reference_file, output) != 0) {
+			printf("\033[31mValidation failed!\033[0m\n");
+			exit(EXIT_FAILURE);
+		} else {
+			printf("\033[32mValidation succeeded!\033[0m\n");
+		}
+	}
+
 	free(mem);
 	return EXIT_SUCCESS;
 
+}
+
+int compare_files(const char *file1, const char *file2) {
+    int fd1 = open(file1, O_RDONLY);
+    int fd2 = open(file2, O_RDONLY);
+    if (fd1 < 0 || fd2 < 0) {
+        perror("open");
+        return -1;
+    }
+
+    struct stat st1, st2;
+    if (fstat(fd1, &st1) < 0 || fstat(fd2, &st2) < 0) {
+        perror("fstat");
+        close(fd1);
+        close(fd2);
+        return -1;
+    }
+
+    // 文件大小不同，直接不一致
+    if (st1.st_size != st2.st_size) {
+        close(fd1);
+        close(fd2);
+        return 1;
+    }
+
+    // 空文件，算一致
+    if (st1.st_size == 0) {
+        close(fd1);
+        close(fd2);
+        return 0;
+    }
+
+    // 映射到内存
+    void *map1 = mmap(NULL, st1.st_size, PROT_READ, MAP_PRIVATE, fd1, 0);
+    void *map2 = mmap(NULL, st2.st_size, PROT_READ, MAP_PRIVATE, fd2, 0);
+    if (map1 == MAP_FAILED || map2 == MAP_FAILED) {
+        perror("mmap");
+        close(fd1);
+        close(fd2);
+        return -1;
+    }
+
+    // 比较
+    int result = memcmp(map1, map2, st1.st_size);
+
+    // 清理资源
+    munmap(map1, st1.st_size);
+    munmap(map2, st2.st_size);
+    close(fd1);
+    close(fd2);
+
+    return (result == 0) ? 0 : 1;
 }
 
 //========================================================================================================================================================================================================200

@@ -2,4 +2,7 @@
 
 DIR=$(cd "$(dirname "${0}")" &> /dev/null && (pwd -W 2> /dev/null || pwd))
 export DATA_DIR=${DIR}/../../data
-./b+tree.out file ${DATA_DIR}/b+tree/mil.txt command ${DATA_DIR}/b+tree/command.txt $@
+# ./b+tree.out file ${DATA_DIR}/b+tree/mil.txt command ${DATA_DIR}/b+tree/command.txt $@
+./b+tree.out file ${DATA_DIR}/b+tree/mil.txt command ${DATA_DIR}/b+tree/command_32.txt --ref output_32.nvidia.txt
+#./b+tree.out file ${DATA_DIR}/b+tree/mil.txt command ${DATA_DIR}/b+tree/command_512.txt --ref output_512.nvidia.txt
+#./b+tree.out file ${DATA_DIR}/b+tree/mil.txt command ${DATA_DIR}/b+tree/command_1024.txt --ref output_1024.nvidia.txt
