@@ -87,6 +87,8 @@ int main(int argc, char *argv[]) {
 #endif
 
   recordDistances = OpenClFindNearestNeighbors(context,numRecords,locations,lat,lng,timing);
+  fflush(stdout);
+  fflush(stderr);
 
   if (export_filename[0] != '\0') {
     if (save_result(export_filename, recordDistances, numRecords, lat, lng) != 0) {
@@ -115,7 +117,7 @@ int main(int argc, char *argv[]) {
     // Compare the distances
     for (i = 0; i < numRecords; i++) {
       if (!almost_equal(recordDistances[i], refDistances[i])) {
-        fprintf(stderr, "Distance mismatch at index %d: computed = %f, reference = %f\n",
+        fprintf(stderr, "Distance mismatch at index %d: computed = %f, reference = %f\nERROR!\n",
                 i, recordDistances[i], refDistances[i]);
         exit(EXIT_FAILURE);
       }

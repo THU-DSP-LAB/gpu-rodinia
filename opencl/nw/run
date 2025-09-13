@@ -1,1 +1,3 @@
-./nw.out 16 10 ./nw.cl -p 0 -d 0
+#./nw.out 16 10 ./nw.cl -p 0 -d 0
+./nw.out 80 10 ./nw.cl -p 0 -d 0
+#./nw.out 256 10 ./nw.cl -p 0 -d 0
