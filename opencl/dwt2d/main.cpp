@@ -51,6 +51,11 @@ cl_int errNum = 0;
 int platform = 0;
 int device = 0;
 
+struct verification_config {
+    int enabled;
+    char *referenceBase;
+};
+
 
 #ifdef TIMING
 #include "timing.h"
@@ -261,6 +266,7 @@ void usage() {
   -f, --forward\t\t\tforward transform\n\
   -r, --reverse\t\t\treverse transform\n\
   -i, --input-dir\t\t\tinput file directory\n\
+  -R, --ref\t\t\treference output basename for verification\n\
   -9, --97\t\t\t9/7 transform\n\
   -5, --53\t\t\t5/3 transform\n\
   -w  --write-visual\t\twrite output in visual (tiled) fashion instead of the linear\n");
@@ -332,6 +338,101 @@ void fatal_CL(cl_int error, int line_no)
 		default:											printf("Invalid OpenCL error code\n");
 
 	}
+}
+
+static char *buildComponentFilename(const char *base, const char *suffix)
+{
+    size_t len = strlen(base) + strlen(suffix) + 1;
+    char *filename = (char *)malloc(len);
+    if (filename == NULL) {
+        return NULL;
+    }
+    snprintf(filename, len, "%s%s", base, suffix);
+    return filename;
+}
+
+static int compareBinaryFiles(const char *expectedPath, const char *actualPath)
+{
+    FILE *expected = fopen(expectedPath, "rb");
+    if (expected == NULL) {
+        fprintf(stderr, "Failed to open reference file: %s\n", expectedPath);
+        return -1;
+    }
+
+    FILE *actual = fopen(actualPath, "rb");
+    if (actual == NULL) {
+        fprintf(stderr, "Failed to open output file: %s\n", actualPath);
+        fclose(expected);
+        return -1;
+    }
+
+    int result = 0;
+    long offset = 0;
+    while (1) {
+        int expectedByte = fgetc(expected);
+        int actualByte = fgetc(actual);
+        if (expectedByte == EOF || actualByte == EOF) {
+            if (expectedByte != actualByte) {
+                fprintf(
+                    stderr,
+                    "Verification failed: size mismatch between %s and %s\n",
+                    expectedPath,
+                    actualPath);
+                result = -1;
+            }
+            break;
+        }
+        if (expectedByte != actualByte) {
+            fprintf(
+                stderr,
+                "Verification failed at byte %ld: %s=%d %s=%d\n",
+                offset,
+                expectedPath,
+                expectedByte,
+                actualPath,
+                actualByte);
+            result = -1;
+            break;
+        }
+        ++offset;
+    }
+
+    fclose(expected);
+    fclose(actual);
+    return result;
+}
+
+static int verifyOutputs(
+    const verification_config *verification,
+    int components,
+    const char *outputBase)
+{
+    if (!verification->enabled) {
+        return 0;
+    }
+
+    const char *suffixes[3] = {".r", ".g", ".b"};
+    int suffixCount = components == 1 ? 1 : 3;
+    for (int i = 0; i < suffixCount; ++i) {
+        char *expectedPath = buildComponentFilename(verification->referenceBase, suffixes[i]);
+        char *actualPath = buildComponentFilename(outputBase, suffixes[i]);
+        if (expectedPath == NULL || actualPath == NULL) {
+            free(expectedPath);
+            free(actualPath);
+            fprintf(stderr, "Failed to allocate verification path buffer\n");
+            return -1;
+        }
+
+        int compareStatus = compareBinaryFiles(expectedPath, actualPath);
+        free(expectedPath);
+        free(actualPath);
+        if (compareStatus != 0) {
+            return -1;
+        }
+    }
+
+    printf("Verification PASSED\n");
+    return 0;
 }
 
 
@@ -942,7 +1043,8 @@ int main(int argc, char **argv)
         {"97",          no_argument,       0, '9'}, //9/7 transform
         {"53",          no_argument,       0, '5' }, //5/3transform
         {"write-visual",no_argument,       0, 'w' }, //write output (subbands) in visual (tiled) order instead of linear
-        {"help",        no_argument,       0, 'h'}  
+        {"ref",         required_argument, 0, 'R' },
+        {"help",        no_argument,       0, 'h'}
     };
     
     int pixWidth    = 0; //<real pixWidth
@@ -955,8 +1057,9 @@ int main(int argc, char **argv)
     int writeVisual = 0; //write output (subbands) in visual (tiled) order instead of linear
     char input_dir[100] = {"."};
     char * pos;
- 
-    while ((ch = getopt_long(argc, argv, "d:p:c:b:l:i:D:fr95wh", longopts, &optindex)) != -1) 
+    verification_config verification = {0, NULL};
+
+    while ((ch = getopt_long(argc, argv, "d:p:c:b:l:i:D:fr95wR:h", longopts, &optindex)) != -1)
 	{
         switch (ch) {
         case 'D':
@@ -1001,6 +1104,10 @@ int main(int argc, char **argv)
             break;
         case 'w':
             writeVisual = 1;
+            break;
+        case 'R':
+            verification.enabled = 1;
+            verification.referenceBase = strdup(optarg);
             break;
         case 'h':
             usage();
@@ -1146,6 +1253,8 @@ int main(int argc, char **argv)
             processDWT<int>(d, forward, writeVisual);
     }
 
+    int verifyStatus = verifyOutputs(&verification, d->components, d->outFilename);
+
 #ifdef TIMING
     gettimeofday(&tv_close_start, NULL);
 #endif
@@ -1171,9 +1280,11 @@ int main(int argc, char **argv)
 #endif
 
     free(d->srcFilename);
+    free(d->outFilename);
     free(d->srcImg);
     free(d);
-	
-    return 0;
+    free(verification.referenceBase);
+
+    return verifyStatus == 0 ? 0 : 1;
 	
 }

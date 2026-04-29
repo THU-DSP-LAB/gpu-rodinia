@@ -104,11 +104,17 @@ main ( int argc, char *argv[] )
   printf("Time consumed(ms): %lf\n", 1000*get_interval_by_sec(&sw));
 
   if (do_verify){
+    int mismatch_count;
     printf("After LUD\n");
     print_matrix(m, matrix_dim);
     printf(">>>Verify<<<<\n");
-    lud_verify(mm, m, matrix_dim); 
+    mismatch_count = lud_verify(mm, m, matrix_dim);
     free(mm);
+    if (mismatch_count != 0) {
+      fprintf(stderr, "Verification failed with %d mismatches\n", mismatch_count);
+      free(m);
+      return EXIT_FAILURE;
+    }
   }
 
   free(m);

@@ -28,6 +28,18 @@ float chip_height = 0.016;
 float chip_width  = 0.016;
 float amb_temp    = 80.0;
 
+static int verify_cpu_accuracy(const float *actual, const float *expected, int count)
+{
+  float acc = accuracy((float *)actual, (float *)expected, count);
+  printf("Accuracy: %e\n", acc);
+  if (acc > TOL)
+    {
+      fprintf(stderr, "CPU reference mismatch: accuracy %e exceeds tolerance %e\n", acc, TOL);
+      return EXIT_FAILURE;
+    }
+  return EXIT_SUCCESS;
+}
+
 void usage(int argc, char **argv)
 {
   fprintf(stderr, "Usage: %s <-n rows/cols> <-l layers> <-i iterations> <-f powerFile tempFile outputFile> [-p platform] [-d device]\n", argv[0]);
@@ -355,7 +367,7 @@ int main(int argc, char** argv)
     }
 
   clFinish(commands);
-  err = clEnqueueReadBuffer( commands, d_c, CL_TRUE, 0, sizeof(float) * count, tempOut, 0, NULL, &event);  
+  err = clEnqueueReadBuffer( commands, d_a, CL_TRUE, 0, sizeof(float) * count, tempOut, 0, NULL, &event);
   if (err != CL_SUCCESS)
     {
       printf("Error: Failed to read output array!\n%s\n", err_code(err));
@@ -394,8 +406,10 @@ int main(int argc, char** argv)
 
   float* answer = (float*)calloc(size, sizeof(float));
   computeTempCPU(pIn, tempCopy, answer, numCols, numRows, layers, Cap, Rx, Ry, Rz, dt, amb_temp, iterations);
-  float acc = accuracy(tempOut,answer,numRows*numCols*layers);
-  printf("Accuracy: %e\n",acc);
+  if (verify_cpu_accuracy(tempOut, answer, numRows * numCols * layers) != EXIT_SUCCESS)
+    {
+      return EXIT_FAILURE;
+    }
 
   writeoutput(tempOut,numRows,numCols,layers,ofile);
 

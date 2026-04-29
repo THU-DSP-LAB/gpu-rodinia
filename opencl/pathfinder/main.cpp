@@ -136,6 +136,50 @@ void fatal(char *s)
 	fprintf(stderr, "error: %s\n", s);
 }
 
+int min3(int a, int b, int c)
+{
+	return MIN(MIN(a, b), c);
+}
+
+bool verify_result()
+{
+	int* reference = new int[cols];
+	int* next = new int[cols];
+	for (int j = 0; j < cols; j++) {
+		reference[j] = wall[0][j];
+	}
+
+	for (int i = 1; i < rows; i++) {
+		for (int j = 0; j < cols; j++) {
+			int left = (j == 0) ? reference[j] : reference[j - 1];
+			int up = reference[j];
+			int right = (j == cols - 1) ? reference[j] : reference[j + 1];
+			next[j] = wall[i][j] + min3(left, up, right);
+		}
+		for (int j = 0; j < cols; j++) {
+			reference[j] = next[j];
+		}
+	}
+
+	for (int j = 0; j < cols; j++) {
+		if (reference[j] != result[j]) {
+			fprintf(stderr,
+			        "Verification failed at column %d: expected %d, got %d\n",
+			        j,
+			        reference[j],
+			        result[j]);
+			delete[] reference;
+			delete[] next;
+			return false;
+		}
+	}
+
+	delete[] reference;
+	delete[] next;
+	printf("Verification: OK\n");
+	return true;
+}
+
 int main(int argc, char** argv)
 {
 	init(argc, argv);
@@ -285,6 +329,8 @@ int main(int argc, char** argv)
 	printf("\n");
 #endif
 
+	bool verified = verify_result();
+
 #ifdef  TIMING
 	gettimeofday(&tv_close_start, NULL);
 #endif
@@ -303,5 +349,5 @@ int main(int argc, char** argv)
 	delete[] wall;
 	delete[] result;
 
-	return EXIT_SUCCESS;
+	return verified ? EXIT_SUCCESS : EXIT_FAILURE;
 }

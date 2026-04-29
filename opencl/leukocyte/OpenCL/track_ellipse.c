@@ -184,7 +184,6 @@ void ellipsetrack(avi_t *video, double *xc0, double *yc0, int Nc, int R, int Np,
 			m_free(IMGVF[cell_num]);
 	    }
 
-#ifdef OUTPUT
 		if (frame_num == Nf)
 		  {
 		    FILE * pFile;
@@ -195,8 +194,6 @@ void ellipsetrack(avi_t *video, double *xc0, double *yc0, int Nc, int R, int Np,
 
 		    fclose (pFile);
 		  }
-		
-#endif
 
 		
 		free(IMGVF);

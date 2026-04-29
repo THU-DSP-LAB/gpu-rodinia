@@ -167,6 +167,72 @@ double gettime() {
   return t.tv_sec+t.tv_usec*1e-6;
 }
 
+static void run_reference_nw(
+    const int *reference,
+    const int *initial_itemsets,
+    int *output_itemsets,
+    int max_rows,
+    int max_cols,
+    int penalty)
+{
+    memcpy(output_itemsets, initial_itemsets, max_rows * max_cols * sizeof(int));
+    for (int i = 1; i < max_rows; ++i) {
+        for (int j = 1; j < max_cols; ++j) {
+            int nw = output_itemsets[(i - 1) * max_cols + j - 1];
+            int w = output_itemsets[i * max_cols + j - 1];
+            int n = output_itemsets[(i - 1) * max_cols + j];
+            int score = reference[i * max_cols + j];
+            output_itemsets[i * max_cols + j] =
+                maximum(nw + score, w - penalty, n - penalty);
+        }
+    }
+}
+
+static int verify_results(
+    const int *reference,
+    const int *initial_itemsets,
+    const int *gpu_output_itemsets,
+    int max_rows,
+    int max_cols,
+    int penalty)
+{
+    int *cpu_output_itemsets =
+        (int *)malloc(max_rows * max_cols * sizeof(int));
+    if (cpu_output_itemsets == NULL) {
+        fprintf(stderr, "ERROR: failed to allocate CPU reference buffer\n");
+        return -1;
+    }
+
+    run_reference_nw(
+        reference,
+        initial_itemsets,
+        cpu_output_itemsets,
+        max_rows,
+        max_cols,
+        penalty);
+
+    for (int i = 0; i < max_rows; ++i) {
+        for (int j = 0; j < max_cols; ++j) {
+            int index = i * max_cols + j;
+            if (cpu_output_itemsets[index] != gpu_output_itemsets[index]) {
+                fprintf(
+                    stderr,
+                    "Verification failed at (%d, %d): CPU=%d GPU=%d\n",
+                    i,
+                    j,
+                    cpu_output_itemsets[index],
+                    gpu_output_itemsets[index]);
+                free(cpu_output_itemsets);
+                return -1;
+            }
+        }
+    }
+
+    printf("Verification PASSED\n");
+    free(cpu_output_itemsets);
+    return 0;
+}
+
 int main(int argc, char **argv){
 
   printf("WG size of kernel = %d \n", BLOCK_SIZE);
@@ -415,6 +481,9 @@ int main(int argc, char **argv){
     clReleaseEvent(event[0]);
 #endif
 
+    int verify_status =
+        verify_results(reference, input_itemsets, output_itemsets, max_rows, max_cols, penalty);
+
 #define TRACEBACK
 #ifdef TRACEBACK
 	
@@ -507,5 +576,8 @@ int main(int argc, char **argv){
 	free(reference);
 	free(input_itemsets);
 	free(output_itemsets);
+    if (verify_status != 0) {
+        return 1;
+    }
+    return 0;
 }
-

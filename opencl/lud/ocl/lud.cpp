@@ -386,11 +386,18 @@ main ( int argc, char *argv[] )
 #endif
 
 	if (do_verify){
+		int mismatch_count;
 		printf("After LUD\n");
 		print_matrix_verify(m, matrix_dim);
 		printf(">>>Verify<<<<\n");
-		lud_verify(mm, m, matrix_dim); 
+		mismatch_count = lud_verify(mm, m, matrix_dim);
 		free(mm);
+		if (mismatch_count != 0) {
+			fprintf(stderr, "Verification failed with %d mismatches\n", mismatch_count);
+			free(m);
+			if(shutdown()) return -1;
+			return EXIT_FAILURE;
+		}
 	}
 
 	free(m);
@@ -400,5 +407,4 @@ main ( int argc, char *argv[] )
 }				
 
 /* ----------  end of function main  ---------- */
-
 
