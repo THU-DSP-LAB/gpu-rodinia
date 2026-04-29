@@ -3,9 +3,7 @@ include ../../common/make.config
 #Can be changed by `make TYPE=CPU`
 TYPE = GPU
 
-ifdef OUTPUT
 override OUTPUT = -DOUTPUT
-endif
 
 OCL_INC_DIR = -I$(OPENCL_INC)
 OCL_LIB_DIR = -L$(OPENCL_LIB)
