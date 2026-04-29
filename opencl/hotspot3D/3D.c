@@ -34,9 +34,10 @@ static int verify_cpu_accuracy(const float *actual, const float *expected, int c
   printf("Accuracy: %e\n", acc);
   if (acc > TOL)
     {
-      fprintf(stderr, "CPU reference mismatch: accuracy %e exceeds tolerance %e\n", acc, TOL);
+      fprintf(stderr, "\033[91mFAIL\033[0m CPU reference mismatch: accuracy %e exceeds tolerance %e\n", acc, TOL);
       return EXIT_FAILURE;
     }
+  printf("CPU reference check: \033[92mPASS\033[0m\n");
   return EXIT_SUCCESS;
 }
 

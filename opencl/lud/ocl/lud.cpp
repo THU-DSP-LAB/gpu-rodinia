@@ -393,11 +393,12 @@ main ( int argc, char *argv[] )
 		mismatch_count = lud_verify(mm, m, matrix_dim);
 		free(mm);
 		if (mismatch_count != 0) {
-			fprintf(stderr, "Verification failed with %d mismatches\n", mismatch_count);
+			fprintf(stderr, "\033[91mFAIL\033[0m Verification failed with %d mismatches\n", mismatch_count);
 			free(m);
 			if(shutdown()) return -1;
 			return EXIT_FAILURE;
 		}
+		printf("Verification \033[92mPASS\033[0m\n");
 	}
 
 	free(m);
@@ -407,4 +408,3 @@ main ( int argc, char *argv[] )
 }				
 
 /* ----------  end of function main  ---------- */
-

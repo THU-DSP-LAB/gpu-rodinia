@@ -29,7 +29,7 @@ static int verify_reference_file(const char *result_path, const char *reference_
 		int reference_status = fscanf(reference, "%d,%lf,%lf", &reference_cell, &reference_x, &reference_y);
 		if (result_status == EOF && reference_status == EOF) break;
 		if (result_status != 3 || reference_status != 3) {
-			fprintf(stderr, "Error: malformed result/reference file (%s, %s)\n", result_path, reference_path);
+			fprintf(stderr, "\033[91mFAIL\033[0m malformed result/reference file (%s, %s)\n", result_path, reference_path);
 			fclose(result);
 			fclose(reference);
 			return -1;
@@ -38,7 +38,7 @@ static int verify_reference_file(const char *result_path, const char *reference_
 		    fabs(result_x - reference_x) > RESULT_TOLERANCE ||
 		    fabs(result_y - reference_y) > RESULT_TOLERANCE) {
 			fprintf(stderr,
-			        "Reference mismatch for %s at cell %d\n"
+			        "\033[91mFAIL\033[0m Reference mismatch for %s at cell %d\n"
 			        "  expected: %d,%.10f,%.10f\n"
 			        "  actual:   %d,%.10f,%.10f\n",
 			        reference_path,
@@ -53,7 +53,7 @@ static int verify_reference_file(const char *result_path, const char *reference_
 
 	fclose(result);
 	fclose(reference);
-	printf("Reference matched: %s\n", reference_path);
+	printf("\033[92mPASS\033[0m Reference matched: %s\n", reference_path);
 	return 0;
 }
 

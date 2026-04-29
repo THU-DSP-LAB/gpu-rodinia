@@ -28,7 +28,7 @@ static int load_reference(float *values, int count, const char *file) {
 			return -1;
 		}
 		if (index != i) {
-			fprintf(stderr, "Reference index mismatch in %s: got %d, expected %d\n", file, index, i);
+			fprintf(stderr, "\033[91mFAIL\033[0m Reference index mismatch in %s: got %d, expected %d\n", file, index, i);
 			fclose(fp);
 			return -1;
 		}
@@ -58,14 +58,14 @@ static int verify_reference(const float *actual, int count, const char *file) {
 	for (i = 0; i < count; ++i) {
 		if (!almost_equal(actual[i], reference[i])) {
 			fprintf(stderr,
-					"Reference mismatch at index %d: got %.8f expected %.8f\n",
+					"\033[91mFAIL\033[0m Reference mismatch at index %d: got %.8f expected %.8f\n",
 					i, actual[i], reference[i]);
 			free(reference);
 			return -1;
 		}
 	}
 	free(reference);
-	printf("Reference check passed: %s\n", file);
+	printf("\033[92mPASS\033[0m Reference check passed: %s\n", file);
 	return 0;
 }
 

@@ -421,7 +421,7 @@ int bpnn_train_kernel(BPNN *net, float *eo, float *eh)
 		for (int k = 0; k <= in; k++) {
 			for (int j = 0; j <= hid; j++) {
 				if (!almost_equal(net->input_weights[k][j], new_net->input_weights[k][j])) {
-					printf("ERROR: input_weights[%d][%d] mismatch with reference file %s\n", k, j, ref_file);
+					printf("\033[91mFAIL\033[0m input_weights[%d][%d] mismatch with reference file %s\n", k, j, ref_file);
 					printf(" - REF=%f; DUT=%f\n", new_net->input_weights[k][j], net->input_weights[k][j]);
 					puts("==== REF data ====");
 					print_weights(new_net);
@@ -434,7 +434,7 @@ int bpnn_train_kernel(BPNN *net, float *eo, float *eh)
 		for (int k = 0; k <= hid; k++) {
 			for (int j = 0; j <= out; j++) {
 				if (!almost_equal(net->hidden_weights[k][j], new_net->hidden_weights[k][j])) {
-					printf("ERROR: hidden_weights[%d][%d] mismatch with reference file %s\n", k, j, ref_file);
+					printf("\033[91mFAIL\033[0m hidden_weights[%d][%d] mismatch with reference file %s\n", k, j, ref_file);
 					printf(" - REF=%f; DUT=%f\n", new_net->hidden_weights[k][j], net->hidden_weights[k][j]);
 					puts("==== REF data ====");
 					print_weights(new_net);
@@ -444,7 +444,7 @@ int bpnn_train_kernel(BPNN *net, float *eo, float *eh)
 				}
 			}
 		}
-		printf("All weights match with reference file %s, \033[92mOK\033[0m!\n", ref_file);
+		printf("All weights match with reference file %s, \033[92mPASS\033[0m!\n", ref_file);
 	}
 	// print_weights(net);
 

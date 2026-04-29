@@ -360,7 +360,7 @@ int setup(int argc, char **argv) {
 			exit(EXIT_FAILURE);
 		}
 		if(!almost_equal(ref_rmse, rmse)) {
-			fprintf(stderr, "Error: RMSE mismatch in reference file %s: REF=%g, DUT=%g\n",
+			fprintf(stderr, "\033[91mFAIL\033[0m RMSE mismatch in reference file %s: REF=%g, DUT=%g\n",
 					ref_filename, ref_rmse, rmse);
 			free(ref_cluster_centres);
 			fclose(fp);
@@ -369,7 +369,7 @@ int setup(int argc, char **argv) {
 		for(int i = 0; i < best_nclusters; i++) {
 			for(int j = 0; j < nfeatures; j++) {
 				if(!almost_equal(ref_cluster_centres[i * nfeatures + j], cluster_centres[i][j])) {
-					fprintf(stderr, "Error: cluster centre mismatch in reference file %s at cluster %d, feature %d: REF=%g, DUT=%g\n",
+					fprintf(stderr, "\033[91mFAIL\033[0m cluster centre mismatch in reference file %s at cluster %d, feature %d: REF=%g, DUT=%g\n",
 							ref_filename, i, j, ref_cluster_centres[i * nfeatures + j], cluster_centres[i][j]);
 					free(ref_cluster_centres);
 					fclose(fp);
@@ -379,7 +379,7 @@ int setup(int argc, char **argv) {
 		}
 		free(ref_cluster_centres);
 		fclose(fp);
-		printf("DUT result matches reference file %s, OK.\n", ref_filename);
+		printf("DUT result matches reference file %s, \033[92mPASS\033[0m.\n", ref_filename);
 	}
 
 	/* free up memory */
@@ -390,4 +390,3 @@ int setup(int argc, char **argv) {
 	free(features);    
     return(0);
 }
-

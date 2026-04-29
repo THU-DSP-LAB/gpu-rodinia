@@ -112,14 +112,14 @@ static int verify_reference(const char *path, double xe, double ye, double dista
         fabs(ye - ye_ref) > RESULT_TOLERANCE ||
         fabs(distance - distance_ref) > RESULT_TOLERANCE) {
         fprintf(stderr,
-                "Reference mismatch for %s\n"
+                "\033[91mFAIL\033[0m Reference mismatch for %s\n"
                 "  XE: expected %.10f actual %.10f\n"
                 "  YE: expected %.10f actual %.10f\n"
                 "  distance: expected %.10f actual %.10f\n",
                 path, xe_ref, xe, ye_ref, ye, distance_ref, distance);
         return -1;
     }
-    printf("Reference matched: %s\n", path);
+    printf("\033[92mPASS\033[0m Reference matched: %s\n", path);
     return 0;
 }
 

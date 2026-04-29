@@ -217,7 +217,7 @@ static int verify_results(
             if (cpu_output_itemsets[index] != gpu_output_itemsets[index]) {
                 fprintf(
                     stderr,
-                    "Verification failed at (%d, %d): CPU=%d GPU=%d\n",
+                    "\033[91mFAIL\033[0m Verification failed at (%d, %d): CPU=%d GPU=%d\n",
                     i,
                     j,
                     cpu_output_itemsets[index],
@@ -228,7 +228,7 @@ static int verify_results(
         }
     }
 
-    printf("Verification PASSED\n");
+    printf("Verification \033[92mPASS\033[0m\n");
     free(cpu_output_itemsets);
     return 0;
 }

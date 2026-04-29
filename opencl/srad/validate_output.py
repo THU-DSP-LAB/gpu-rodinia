@@ -4,6 +4,9 @@ import argparse
 import sys
 from pathlib import Path
 
+PASS = "\033[92mPASS\033[0m"
+FAIL = "\033[91mFAIL\033[0m"
+
 
 def load_pgm(path: Path) -> tuple[tuple[int, int, int], list[int]]:
     tokens = []
@@ -32,21 +35,21 @@ def main() -> int:
     reference_path = Path(args.reference)
     output_path = Path(args.output)
     if not output_path.is_file():
-        print(f"Missing output file: {output_path}", file=sys.stderr)
+        print(f"{FAIL} Missing output file: {output_path}", file=sys.stderr)
         return 1
 
     reference_header, reference_pixels = load_pgm(reference_path)
     output_header, output_pixels = load_pgm(output_path)
     if reference_header != output_header:
         print(
-            f"Header mismatch: ref={reference_header} output={output_header}",
+            f"{FAIL} Header mismatch: ref={reference_header} output={output_header}",
             file=sys.stderr,
         )
         return 1
 
     if len(reference_pixels) != len(output_pixels):
         print(
-            f"Pixel count mismatch: ref={len(reference_pixels)} output={len(output_pixels)}",
+            f"{FAIL} Pixel count mismatch: ref={len(reference_pixels)} output={len(output_pixels)}",
             file=sys.stderr,
         )
         return 1
@@ -54,12 +57,12 @@ def main() -> int:
     for index, (ref_value, out_value) in enumerate(zip(reference_pixels, output_pixels)):
         if ref_value != out_value:
             print(
-                f"Pixel mismatch at {index}: ref={ref_value} output={out_value}",
+                f"{FAIL} Pixel mismatch at {index}: ref={ref_value} output={out_value}",
                 file=sys.stderr,
             )
             return 1
 
-    print("Validation OK")
+    print(f"Validation {PASS}")
     return 0
 
 

@@ -164,7 +164,7 @@ bool verify_result()
 	for (int j = 0; j < cols; j++) {
 		if (reference[j] != result[j]) {
 			fprintf(stderr,
-			        "Verification failed at column %d: expected %d, got %d\n",
+			        "\033[91mFAIL\033[0m Verification failed at column %d: expected %d, got %d\n",
 			        j,
 			        reference[j],
 			        result[j]);
@@ -176,7 +176,7 @@ bool verify_result()
 
 	delete[] reference;
 	delete[] next;
-	printf("Verification: OK\n");
+	printf("Verification: \033[92mPASS\033[0m\n");
 	return true;
 }
 

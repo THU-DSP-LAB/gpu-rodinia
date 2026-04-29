@@ -117,7 +117,7 @@ int main(int argc, char *argv[]) {
     // Compare the distances
     for (i = 0; i < numRecords; i++) {
       if (!almost_equal(recordDistances[i], refDistances[i])) {
-        fprintf(stderr, "Distance mismatch at index %d: computed = %f, reference = %f\nERROR!\n",
+        fprintf(stderr, "\033[91mFAIL\033[0m Distance mismatch at index %d: computed = %f, reference = %f\nERROR!\n",
                 i, recordDistances[i], refDistances[i]);
         exit(EXIT_FAILURE);
       }
@@ -131,9 +131,9 @@ int main(int argc, char *argv[]) {
   if (!quiet)
     for(i=0;i<resultsCount;i++) {
       printf("%s --> Distance=%f\n",records[i].recString,records[i].distance);
-    }
+  }
   if (!quiet && ref_filename[0] != '\0') {
-    printf("Testcase results match reference result, \033[32mOK\033[0m.\n");
+    printf("Testcase results match reference result, \033[92mPASS\033[0m.\n");
   }
   free(recordDistances);
   return 0;

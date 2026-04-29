@@ -123,17 +123,17 @@ static int verify_reference(const char *path, int boxes1d, unsigned int seed,
 	long ref_count = 0;
 	FILE *fptr = fopen(path, "r");
 	if (fptr == NULL) {
-		fprintf(stderr, "ERROR: Failed to open %s for reading\n", path);
+		fprintf(stderr, "\033[91mFAIL\033[0m Failed to open %s for reading\n", path);
 		return 1;
 	}
 	if (fscanf(fptr, "# boxes1d=%d seed=%u count=%ld\n", &ref_boxes1d, &ref_seed, &ref_count) != 3) {
-		fprintf(stderr, "ERROR: Invalid reference header in %s\n", path);
+		fprintf(stderr, "\033[91mFAIL\033[0m Invalid reference header in %s\n", path);
 		fclose(fptr);
 		return 1;
 	}
 	if (ref_boxes1d != boxes1d || ref_seed != seed || ref_count != space_elem) {
 		fprintf(stderr,
-			"ERROR: Reference metadata mismatch in %s (boxes1d=%d seed=%u count=%ld, expected %d %u %ld)\n",
+			"\033[91mFAIL\033[0m Reference metadata mismatch in %s (boxes1d=%d seed=%u count=%ld, expected %d %u %ld)\n",
 			path, ref_boxes1d, ref_seed, ref_count, boxes1d, seed, space_elem);
 		fclose(fptr);
 		return 1;
@@ -141,7 +141,7 @@ static int verify_reference(const char *path, int boxes1d, unsigned int seed,
 	for (i = 0; i < space_elem; i++) {
 		fp ref_v = 0.0f, ref_x = 0.0f, ref_y = 0.0f, ref_z = 0.0f;
 		if (fscanf(fptr, "%f, %f, %f, %f\n", &ref_v, &ref_x, &ref_y, &ref_z) != 4) {
-			fprintf(stderr, "ERROR: Failed to parse reference %s at element %ld\n", path, i);
+			fprintf(stderr, "\033[91mFAIL\033[0m Failed to parse reference %s at element %ld\n", path, i);
 			fclose(fptr);
 			return 1;
 		}
@@ -150,7 +150,7 @@ static int verify_reference(const char *path, int boxes1d, unsigned int seed,
 			!almost_equal(fv_cpu[i].y, ref_y) ||
 			!almost_equal(fv_cpu[i].z, ref_z)) {
 			fprintf(stderr,
-				"ERROR: Reference mismatch at element %ld\n"
+				"\033[91mFAIL\033[0m Reference mismatch at element %ld\n"
 				"got=(%.8f, %.8f, %.8f, %.8f) ref=(%.8f, %.8f, %.8f, %.8f)\n",
 				i, fv_cpu[i].v, fv_cpu[i].x, fv_cpu[i].y, fv_cpu[i].z,
 				ref_v, ref_x, ref_y, ref_z);
@@ -159,7 +159,7 @@ static int verify_reference(const char *path, int boxes1d, unsigned int seed,
 		}
 	}
 	fclose(fptr);
-	printf("Reference check passed: %s\n", path);
+	printf("\033[92mPASS\033[0m Reference check passed: %s\n", path);
 	return 0;
 }
 

@@ -14,6 +14,7 @@ from pathlib import Path
 OUTPUT_NAMES = ("density.txt", "momentum.txt", "density_energy.txt")
 REL_TOL = 1e-4
 ABS_TOL = 1e-5
+PASS = "\033[92mPASS\033[0m"
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,7 +60,7 @@ def main() -> int:
     ref_prefix = Path(args.ref_prefix)
     for output_name in OUTPUT_NAMES:
         compare_tokens(Path(output_name), ref_prefix.with_name(f"{ref_prefix.name}_{output_name}"))
-    print("Verification: OK")
+    print(f"Verification: {PASS}")
     return 0
 
 

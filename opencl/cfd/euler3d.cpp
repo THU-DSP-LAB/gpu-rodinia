@@ -150,7 +150,7 @@ bool verify_reference_file(const char* path, const float* h_variables, int nel, 
 	file.read(reinterpret_cast<char*>(&ref_nel), sizeof(ref_nel));
 	file.read(reinterpret_cast<char*>(&ref_nelr), sizeof(ref_nelr));
 	if(ref_nel != nel || ref_nelr != nelr){
-		std::cerr << "Verification failed: expected header (" << ref_nel << ", " << ref_nelr
+		std::cerr << "\033[91mFAIL\033[0m Verification failed: expected header (" << ref_nel << ", " << ref_nelr
 		          << "), got (" << nel << ", " << nelr << ")" << std::endl;
 		return false;
 	}
@@ -165,17 +165,17 @@ bool verify_reference_file(const char* path, const float* h_variables, int nel, 
 			if(nearly_equal(actual, expected)){
 				continue;
 			}
-			std::cerr << "Verification failed at var=" << var << ", index=" << i
+			std::cerr << "\033[91mFAIL\033[0m Verification failed at var=" << var << ", index=" << i
 			          << ": expected " << expected << ", got " << actual << std::endl;
 			return false;
 		}
 	}
 	file.peek();
 	if(!file.eof()){
-		std::cerr << "Verification failed: reference file has trailing data" << std::endl;
+		std::cerr << "\033[91mFAIL\033[0m Verification failed: reference file has trailing data" << std::endl;
 		return false;
 	}
-	std::cout << "Verification: OK" << std::endl;
+	std::cout << "Verification: \033[92mPASS\033[0m" << std::endl;
 	return true;
 }
 

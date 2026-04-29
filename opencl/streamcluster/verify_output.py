@@ -13,6 +13,7 @@ from pathlib import Path
 
 REL_TOL = 1e-5
 ABS_TOL = 1e-6
+PASS = "\033[92mPASS\033[0m"
 
 
 def parse_args() -> argparse.Namespace:
@@ -52,7 +53,7 @@ def compare_tokens(output_tokens: list[str], reference_tokens: list[str]) -> Non
 def main() -> int:
     args = parse_args()
     compare_tokens(read_tokens(Path(args.output)), read_tokens(Path(args.reference)))
-    print("Verification: OK")
+    print(f"Verification: {PASS}")
     return 0
 
 
