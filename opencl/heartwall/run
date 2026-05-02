@@ -4,6 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
+rm -f "${SCRIPT_DIR}/result.txt"
+
 "${SCRIPT_DIR}/heartwall.out" \
   -n 1 \
   -f "${SCRIPT_DIR}/../../data/heartwall/test.avi" \
