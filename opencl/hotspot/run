@@ -1,4 +1,9 @@
 #!/bin/bash
 
-./hotspot.out 64 1 1 ../../data/hotspot/temp_64 ../../data/hotspot/power_64 output.txt -p 0 -d 0 --ref nvidia-ref-64-1-1.txt
-#./hotspot.out 1024 4 10000 ../../data/hotspot/temp_1024 ../../data/hotspot/power_1024 output.txt $@
+# Small smoke:
+# ./hotspot.out 64 1 1 ../../data/hotspot/temp_64 ../../data/hotspot/power_64 output.txt -p 0 -d 0 --ref nvidia-ref-64-1-1.txt
+#
+# Rodinia large reference:
+# ./hotspot.out 1024 4 10000 ../../data/hotspot/temp_1024 ../../data/hotspot/power_1024 output.txt $@
+#
+./hotspot.out 64 4 4 ../../data/hotspot/temp_64 ../../data/hotspot/power_64 output.txt -p 0 -d 0 --ref nvidia-ref-64-4-4.txt

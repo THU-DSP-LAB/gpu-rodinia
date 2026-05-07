@@ -1,8 +1,20 @@
 #!/bin/bash
 
+# Small smoke:
+# ./hotspot3D.out -n 64 -l 8 -i 1 \
+#   -f ../../data/hotspot3D/power_64x8 ../../data/hotspot3D/temp_64x8 output.txt \
+#   -p 0 -d 0
+#
+# Pressure:
+# ./hotspot3D.out -n 512 -l 4 -i 1 \
+#   -f ../../data/hotspot3D/power_512x4 ../../data/hotspot3D/temp_512x4 output.txt \
+#   -p 0 -d 0
+#
+# Rodinia large reference:
 # ./hotspot3D.out -n 512 -l 8 -i 500 \
 #   -f ../../data/hotspot3D/power_512x8 ../../data/hotspot3D/temp_512x8 output.txt \
 #   $@
-./hotspot3D.out -n 64 -l 8 -i 1 \
-  -f ../../data/hotspot3D/power_64x8 ../../data/hotspot3D/temp_64x8 output.txt \
+#
+./hotspot3D.out -n 512 -l 2 -i 1 \
+  -f ../../data/hotspot3D/power_512x2 ../../data/hotspot3D/temp_512x2 output.txt \
   -p 0 -d 0
