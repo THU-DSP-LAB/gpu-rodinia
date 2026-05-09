@@ -1,1 +1,5 @@
-./lavaMD.out -boxes1d 50 -p 0 -d 0
+#!/bin/bash
+
+set -euo pipefail
+
+./lavaMD.out -boxes1d 1 --seed 7 -p 0 -d 0 --ref nvidia-ref-box1-seed7.txt

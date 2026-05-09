@@ -1,3 +1,5 @@
 #!/bin/bash
 
-./dwt2d.out rgb.bmp -i ../../data/dwt2d -D 1024x1024 -f -5 -l 3 -p 0 -d 0 -w
+set -euo pipefail
+
+./dwt2d.out 4.bmp 4.bmp.dwt -i ../../data/dwt2d -D 4x4 -f -5 -l 1 -p 0 -d 0 -R nvidia-ref-4.bmp.dwt

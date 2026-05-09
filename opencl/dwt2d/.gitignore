@@ -1,1 +1,2 @@
 *.bmp.dwt.*
+!nvidia-ref-*.bmp.dwt.*

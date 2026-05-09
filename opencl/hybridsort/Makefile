@@ -10,6 +10,8 @@ ifdef VERIFY
 override VERIFY = -DVERIFY
 endif
 
+VERIFY ?= -DVERIFY
+
 ifdef OUTPUT
 override OUTPUT = -DOUTPUT
 endif
