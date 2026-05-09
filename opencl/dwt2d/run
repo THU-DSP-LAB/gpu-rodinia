@@ -2,4 +2,4 @@
 
 set -euo pipefail
 
-./dwt2d.out 4.bmp 4.bmp.dwt -i ../../data/dwt2d -D 4x4 -f -5 -l 1 -p 0 -d 0 -R nvidia-ref-4.bmp.dwt
+./dwt2d.out 192.bmp 192.bmp.dwt -i ../../data/dwt2d -D 192x192 -f -5 -l 3 -p 0 -d 0 -R nvidia-ref-192.bmp.dwt

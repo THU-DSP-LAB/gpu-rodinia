@@ -351,6 +351,9 @@ static char *buildComponentFilename(const char *base, const char *suffix)
     return filename;
 }
 
+static const char *VERIFICATION_PASS = "\033[92mPASSED\033[0m";
+static const char *VERIFICATION_FAIL = "\033[91mFAILED\033[0m";
+
 static int compareBinaryFiles(const char *expectedPath, const char *actualPath)
 {
     FILE *expected = fopen(expectedPath, "rb");
@@ -375,7 +378,8 @@ static int compareBinaryFiles(const char *expectedPath, const char *actualPath)
             if (expectedByte != actualByte) {
                 fprintf(
                     stderr,
-                    "Verification failed: size mismatch between %s and %s\n",
+                    "Verification %s: size mismatch between %s and %s\n",
+                    VERIFICATION_FAIL,
                     expectedPath,
                     actualPath);
                 result = -1;
@@ -385,7 +389,8 @@ static int compareBinaryFiles(const char *expectedPath, const char *actualPath)
         if (expectedByte != actualByte) {
             fprintf(
                 stderr,
-                "Verification failed at byte %ld: %s=%d %s=%d\n",
+                "Verification %s at byte %ld: %s=%d %s=%d\n",
+                VERIFICATION_FAIL,
                 offset,
                 expectedPath,
                 expectedByte,
@@ -431,7 +436,7 @@ static int verifyOutputs(
         }
     }
 
-    printf("Verification PASSED\n");
+    printf("Verification %s\n", VERIFICATION_PASS);
     return 0;
 }
 

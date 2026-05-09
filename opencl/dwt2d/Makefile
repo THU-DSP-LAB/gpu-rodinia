@@ -31,7 +31,7 @@ dwt2d:
 		$(OUTPUT) \
 		$(OCL_LIB)
 
-clean:	
+clean:
 	rm -rf *.o dwt2d.out
-	rm *.bmp.dwt.*
+	find . -maxdepth 1 -type f -name '*.bmp.dwt.*' ! -name 'nvidia-ref-*.bmp.dwt.*' -delete
 
