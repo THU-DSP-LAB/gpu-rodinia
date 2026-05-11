@@ -1,1 +1,6 @@
-./hybridsort.out r -p 0 -d 0
+#!/bin/bash
+
+set -euo pipefail
+
+python3 -c 'import random; random.seed(7); print(" ".join(f"{random.random():.8f}" for _ in range(4096)))' > hybridinput-small.txt
+./hybridsort.out hybridinput-small.txt -p 0 -d 0

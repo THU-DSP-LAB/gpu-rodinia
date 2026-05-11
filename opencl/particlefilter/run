@@ -1,6 +1,5 @@
 #!/bin/bash
 
-#./OCL_particlefilter_naive.out -x 128 -y 128 -z 10 -np 10000
-#./OCL_particlefilter_double.out -x 128 -y 128 -z 10 -np 400000 $@
-./OCL_particlefilter_single.out -x 128 -y 128 -z 10 -np 400000 -p 0 -d 0
-#cat ./output.txt
+set -euo pipefail
+
+./OCL_particlefilter_single.out -x 16 -y 16 -z 3 -np 100 -p 0 -d 0 --ref nvidia-ref-16x16x3-np100.txt

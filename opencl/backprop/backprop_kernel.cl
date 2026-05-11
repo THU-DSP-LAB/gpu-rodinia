@@ -1,6 +1,6 @@
-#define THREADS 256
 #define WIDTH 16  
 #define HEIGHT 16 
+#define THREADS (WIDTH*HEIGHT)
 #define ETA 0.3f       
 #define MOMENTUM 0.3f  
 
@@ -13,11 +13,13 @@ bpnn_layerforward_ocl(__global float *input_cuda,
 	                  __global float *output_hidden_cuda,
 					  __global float *input_hidden_cuda,
 					  __global float *hidden_partial_sum,
-					  __local float *input_node,
-					  __local float *weight_matrix,
+					//   __local float *input_node,
+					//   __local float *weight_matrix,
 					  int in,
 					  int hid) 
 {
+	__local float input_node[HEIGHT];
+	__local float weight_matrix[WIDTH * HEIGHT];
 
    int by = get_group_id(1);
    int tx = get_local_id(0);

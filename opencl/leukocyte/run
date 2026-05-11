@@ -1,1 +1,5 @@
-./leukocyte.out ../../data/leukocyte/testfile.avi 100
+#!/bin/bash
+
+set -euo pipefail
+
+./leukocyte.out ../../data/leukocyte/testfile.avi 1 --ref nvidia-ref-frame1.txt

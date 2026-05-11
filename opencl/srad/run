@@ -1,1 +1,16 @@
-./srad.out -n 1000 -l 0.5 -s 502 458 -p 0 -d 0
+#!/bin/bash
+
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+
+"${SCRIPT_DIR}/srad.out" \
+  -n 1 \
+  -l 1 \
+  -s 64 64 \
+  -p 0 \
+  -d 0
+
+python3 "${SCRIPT_DIR}/validate_output.py" \
+  --reference "${SCRIPT_DIR}/nvidia-image-n1-l1-s64x64.pgm" \
+  --output "${SCRIPT_DIR}/output/image_out.pgm"

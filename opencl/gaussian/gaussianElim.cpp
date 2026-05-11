@@ -80,6 +80,28 @@ create_matrix(float *m, int size){
 
 }
 
+// CPU reference implementation for Gaussian elimination
+void gaussianEliminationCPU(std::vector<float> &a, std::vector<float> &b,
+                            std::vector<float> &x, int n) {
+  // Forward elimination
+  for (int k = 0; k < n - 1; k++) {
+    for (int i = k + 1; i < n; i++) {
+      float factor = a[i * n + k] / a[k * n + k];
+      for (int j = k; j < n; j++) {
+        a[i * n + j] -= factor * a[k * n + j];
+      }
+      b[i] -= factor * b[k];
+    }
+  }
+  // Back substitution
+  for (int i = n - 1; i >= 0; i--) {
+    x[i] = b[i];
+    for (int j = i + 1; j < n; j++) {
+      x[i] -= a[i * n + j] * x[j];
+    }
+    x[i] /= a[i * n + i];
+  }
+}
 
 int main(int argc, char *argv[]) {
 
@@ -137,6 +159,8 @@ int main(int argc, char *argv[]) {
 	  b[i]=1.0;
 
       }
+    auto a_cpu = std::vector<float>(a, a + size * size);
+    auto b_cpu = std::vector<float>(b, b + size);
 
     if (!quiet && show_data) {
       printf("The input matrix a is:\n");
@@ -152,6 +176,7 @@ int main(int argc, char *argv[]) {
     // create a new vector to hold the final answer
 
     finalVec = (float *) malloc(size * sizeof(float));
+    auto finalVec_cpu = std::vector<float>(finalVec, finalVec + size);
     
     InitPerRun(size,m);
 
@@ -171,6 +196,17 @@ int main(int argc, char *argv[]) {
         printf("The final solution is: \n");
         PrintAry(finalVec,size);
     }
+
+    // CPU reference implementation for verification
+    gaussianEliminationCPU(a_cpu, b_cpu, finalVec_cpu, size);
+    for(int i = 0; i < size; i++) {
+      if (fabs(finalVec_cpu[i] - finalVec[i]) > 1e-4) {
+        printf("ERROR: CPU & openCL result mismatch at index %d: CPU=%f, GPU=%f\n", i,
+               finalVec_cpu[i], finalVec[i]);
+        return -1;
+      }
+    }
+    printf("CPU & OpenCL results match, OK!\n");
 
     free(m);
     free(a);

@@ -1,3 +1,5 @@
 #!/bin/bash
 
-./nn.out filelist.txt -r 5 -lat 30 -lng 90 -f ../../data -t -p 0 -d 0
+# ./nn.out ../../data/nn/list128.txt -r 20 -lat 83 -lng 14 -f ../../data/nn -t -p 0 -d 0 --ref nvidia-result-128-lat83-lng14
+./nn.out ../../data/nn/list1k.txt -r 20 -lat 13 -lng 27 -f ../../data/nn -t -p 0 -d 0 --ref nvidia-result-1k-lat13-lng27
+# ./nn.out ../../data/nn/list64k.txt -r 20 -lat 30 -lng 90 -f ../../data/nn -t -p 0 -d 0 --ref nvidia-result-64k-lat30-lng90

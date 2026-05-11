@@ -1,0 +1,13 @@
+*.metadata
+*.data
+*.log
+object*.cl
+object*.dump
+object*.vmem
+object*.riscv
+waveform.fst*
+rtl.log*
+cyclesim.log*
+.cache/
+compile_commands.json
+*.gtkw

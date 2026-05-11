@@ -14,6 +14,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <cstring>
 #include <math.h>
 #include "CLHelper.h" 
  
@@ -22,7 +23,7 @@
  * 
  */ 
 #define GAMMA 1.4f
-#define iterations 2000
+#define DEFAULT_ITERATIONS 2000
 #ifndef block_length
 	#define block_length 192
 #endif
@@ -48,6 +49,8 @@
 #define VAR_MOMENTUM  1
 #define VAR_DENSITY_ENERGY (VAR_MOMENTUM+NDIM)
 #define NVAR (VAR_DENSITY_ENERGY+1)
+#define CFD_REL_TOL 1e-4f
+#define CFD_ABS_TOL 1e-5f
 
 //self-defined user type
 typedef struct{
@@ -85,10 +88,7 @@ void download(T* dst, cl_mem src, int N){
 	_clMemcpyD2H(dst, src, N*sizeof(T));
 }
 
-void dump(cl_mem variables, int nel, int nelr){
-	float* h_variables = new float[nelr*NVAR];
-	download(h_variables, variables, nelr*NVAR);
-
+void dump_host_variables(const float* h_variables, int nel, int nelr){
 	{
 		std::ofstream file("density.txt");
 		file << nel << " " << nelr << std::endl;
@@ -112,7 +112,128 @@ void dump(cl_mem variables, int nel, int nelr){
 		file << nel << " " << nelr << std::endl;
 		for(int i = 0; i < nel; i++) file << h_variables[i + VAR_DENSITY_ENERGY*nelr] << std::endl;
 	}
+}
+
+bool nearly_equal(float actual, float expected){
+	float diff = fabs(actual - expected);
+	if(diff <= CFD_ABS_TOL){
+		return true;
+	}
+	float abs_actual = fabs(actual);
+	float abs_expected = fabs(expected);
+	float scale = abs_actual > abs_expected ? abs_actual : abs_expected;
+	return diff <= CFD_REL_TOL * scale;
+}
+
+void write_reference_file(const char* path, const float* h_variables, int nel, int nelr){
+	std::ofstream file(path, std::ios::binary);
+	if(!file){
+		throw(string("can not open reference file for writing"));
+	}
+	file.write(reinterpret_cast<const char*>(&nel), sizeof(nel));
+	file.write(reinterpret_cast<const char*>(&nelr), sizeof(nelr));
+	for(int var = 0; var < NVAR; var++){
+		for(int i = 0; i < nel; i++){
+			float value = h_variables[i + var * nelr];
+			file.write(reinterpret_cast<const char*>(&value), sizeof(value));
+		}
+	}
+}
+
+bool verify_reference_file(const char* path, const float* h_variables, int nel, int nelr){
+	std::ifstream file(path, std::ios::binary);
+	if(!file){
+		throw(string("can not open reference file for reading"));
+	}
+	int ref_nel = 0;
+	int ref_nelr = 0;
+	file.read(reinterpret_cast<char*>(&ref_nel), sizeof(ref_nel));
+	file.read(reinterpret_cast<char*>(&ref_nelr), sizeof(ref_nelr));
+	if(ref_nel != nel || ref_nelr != nelr){
+		std::cerr << "\033[91mFAIL\033[0m Verification failed: expected header (" << ref_nel << ", " << ref_nelr
+		          << "), got (" << nel << ", " << nelr << ")" << std::endl;
+		return false;
+	}
+	for(int var = 0; var < NVAR; var++){
+		for(int i = 0; i < nel; i++){
+			float expected = 0.0f;
+			file.read(reinterpret_cast<char*>(&expected), sizeof(expected));
+			if(!file){
+				throw(string("reference file truncated"));
+			}
+			float actual = h_variables[i + var * nelr];
+			if(nearly_equal(actual, expected)){
+				continue;
+			}
+			std::cerr << "\033[91mFAIL\033[0m Verification failed at var=" << var << ", index=" << i
+			          << ": expected " << expected << ", got " << actual << std::endl;
+			return false;
+		}
+	}
+	file.peek();
+	if(!file.eof()){
+		std::cerr << "\033[91mFAIL\033[0m Verification failed: reference file has trailing data" << std::endl;
+		return false;
+	}
+	std::cout << "Verification: \033[92mPASS\033[0m" << std::endl;
+	return true;
+}
+
+struct run_options {
+	int iteration_count;
+	const char* verify_ref_path;
+	const char* write_ref_path;
+	bool dump_output;
+};
+
+run_options parse_run_options(int argc, char** argv){
+	run_options options = {DEFAULT_ITERATIONS, NULL, NULL, true};
+	for(int i = 2; i < argc; i++){
+		if(std::strcmp(argv[i], "-i") == 0){
+			if(i + 1 >= argc){
+				throw(string("missing iteration count after -i"));
+			}
+			options.iteration_count = atoi(argv[++i]);
+			if(options.iteration_count <= 0){
+				throw(string("iteration count must be positive"));
+			}
+		}
+		else if(std::strcmp(argv[i], "--verify-ref") == 0){
+			if(i + 1 >= argc){
+				throw(string("missing path after --verify-ref"));
+			}
+			options.verify_ref_path = argv[++i];
+			options.dump_output = false;
+		}
+		else if(std::strcmp(argv[i], "--write-ref") == 0){
+			if(i + 1 >= argc){
+				throw(string("missing path after --write-ref"));
+			}
+			options.write_ref_path = argv[++i];
+			options.dump_output = false;
+		}
+		else if(std::strcmp(argv[i], "--dump-output") == 0){
+			options.dump_output = true;
+		}
+	}
+	return options;
+}
+
+bool finalize_solution(cl_mem variables, int nel, int nelr, const run_options& options){
+	float* h_variables = new float[nelr*NVAR];
+	download(h_variables, variables, nelr*NVAR);
+	if(options.write_ref_path != NULL){
+		write_reference_file(options.write_ref_path, h_variables, nel, nelr);
+	}
+	bool verified = true;
+	if(options.verify_ref_path != NULL){
+		verified = verify_reference_file(options.verify_ref_path, h_variables, nel, nelr);
+	}
+	if(options.dump_output){
+		dump_host_variables(h_variables, nel, nelr);
+	}
 	delete[] h_variables;
+	return verified;
 }
 
 void initialize_variables(int nelr, cl_mem variables, cl_mem ff_variable) throw(string){
@@ -210,6 +331,7 @@ int main(int argc, char** argv){
 		return 0;
 	}
 	const char* data_file_name = argv[1];
+	run_options options = parse_run_options(argc, argv);
 	_clCmdParams(argc, argv);
 	cl_mem ff_variable, ff_flux_contribution_momentum_x, ff_flux_contribution_momentum_y,ff_flux_contribution_momentum_z,  ff_flux_contribution_density_energy;
 	cl_mem areas, elements_surrounding_elements, normals;
@@ -346,7 +468,7 @@ int main(int argc, char** argv){
 		std::cout << "Starting..." << std::endl;
 
 		// Begin iterations
-		for(int i = 0; i < iterations; i++){
+		for(int i = 0; i < options.iteration_count; i++){
 			copy<float>(old_variables, variables, nelr*NVAR);
 			// for the first iteration we compute the time step
 			compute_step_factor(nelr, variables, areas, step_factors);
@@ -359,7 +481,7 @@ int main(int argc, char** argv){
 		}
 		_clFinish();
 		std::cout << "Saving solution..." << std::endl;
-		dump(variables, nel, nelr);
+		bool verified = finalize_solution(variables, nel, nelr, options);
 		std::cout << "Saved solution..." << std::endl;
 		_clStatistics();
 		std::cout << "Cleaning up..." << std::endl;
@@ -380,6 +502,9 @@ int main(int argc, char** argv){
 		_clRelease();
 		std::cout << "Done..." << std::endl;
 		_clPrintTiming();
+		if(!verified){
+			return 1;
+		}
 	}
 	catch(string msg){
 		std::cout<<"--cambine:( an exception catched in main body ->"<<msg<<std::endl;		

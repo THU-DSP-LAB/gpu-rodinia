@@ -15,4 +15,4 @@ run:
 	./$(EXE) 1024 4 10000 ../../data/hotspot/temp_1024 ../../data/hotspot/power_1024 output.txt -p 0 -d 0
 
 clean:
-	rm -f $(EXE) *.txt || true
+	rm -f $(EXE) || true

@@ -84,6 +84,44 @@ static cl_command_queue cmd_queue;
 static cl_device_type device_type;
 static cl_device_id * device_list;
 static cl_int num_devices;
+static const float RESULT_TOLERANCE = 1e-4f;
+
+static int load_reference_values(const char *path, double *xe_ref, double *ye_ref, double *distance_ref) {
+    FILE *fp = fopen(path, "r");
+    if (fp == NULL) {
+        fprintf(stderr, "ERROR: failed to open reference file %s\n", path);
+        return -1;
+    }
+    int scanned = fscanf(fp, "XE: %lf\nYE: %lf\ndistance: %lf", xe_ref, ye_ref, distance_ref);
+    fclose(fp);
+    if (scanned != 3) {
+        fprintf(stderr, "ERROR: malformed reference file %s\n", path);
+        return -1;
+    }
+    return 0;
+}
+
+static int verify_reference(const char *path, double xe, double ye, double distance) {
+    double xe_ref;
+    double ye_ref;
+    double distance_ref;
+    if (load_reference_values(path, &xe_ref, &ye_ref, &distance_ref) != 0) {
+        return -1;
+    }
+    if (fabs(xe - xe_ref) > RESULT_TOLERANCE ||
+        fabs(ye - ye_ref) > RESULT_TOLERANCE ||
+        fabs(distance - distance_ref) > RESULT_TOLERANCE) {
+        fprintf(stderr,
+                "\033[91mFAIL\033[0m Reference mismatch for %s\n"
+                "  XE: expected %.10f actual %.10f\n"
+                "  YE: expected %.10f actual %.10f\n"
+                "  distance: expected %.10f actual %.10f\n",
+                path, xe_ref, xe, ye_ref, ye, distance_ref, distance);
+        return -1;
+    }
+    printf("\033[92mPASS\033[0m Reference matched: %s\n", path);
+    return 0;
+}
 
 /*
  * @brief sets up the OpenCL framework by detecting and initializing the available device
@@ -477,7 +515,7 @@ int findIndex(float * CDF, int lengthCDF, float value) {
  * @param seed The seed array used for random number generation
  * @param Nparticles The number of particles to be used
  */
-int particleFilter(unsigned char * I, int IszX, int IszY, int Nfr, int * seed, int Nparticles) {
+int particleFilter(unsigned char * I, int IszX, int IszY, int Nfr, int * seed, int Nparticles, const char *ref_path) {
     int max_size = IszX * IszY*Nfr;
     //original particle centroid
     float xe = roundFloat(IszY / 2.0);
@@ -1009,6 +1047,9 @@ int particleFilter(unsigned char * I, int IszX, int IszY, int Nfr, int * seed, i
     fprintf(fid, "YE: %lf\n", ye);
     fprintf(fid, "distance: %lf\n", distance);
     fclose(fid);
+    if (ref_path != NULL && verify_reference(ref_path, xe, ye, distance) != 0) {
+        return -1;
+    }
 
 
     //OpenCL freeing of memory
@@ -1043,11 +1084,12 @@ int particleFilter(unsigned char * I, int IszX, int IszY, int Nfr, int * seed, i
     free(CDF);
     free(ind);
     free(u);
+    return 0;
 }
 
 int main(int argc, char * argv[]) {
 
-    const char* usage = "float.out -x <dimX> -y <dimY> -z <Nfr> -np <Nparticles> [-p platform] [-d device]";
+    const char* usage = "float.out -x <dimX> -y <dimY> -z <Nfr> -np <Nparticles> [-p platform] [-d device] [--ref path]";
     //check number of arguments
     if (argc < 9) {
         printf("%s\n", usage);
@@ -1105,20 +1147,29 @@ int main(int argc, char * argv[]) {
         return 0;
     }
 
-	for (int i = 9; i < argc; ++i) {
-		switch (argv[i][1]) {
-		case 'p':	//--p stands for platform id
-			if (++i < argc)
-				sscanf(argv[i], "%d", &platform_id_inuse);
-		break;
-		case 'd':	 //--d stands for device id
-			if (++i < argc)
-				sscanf(argv[i], "%d", &device_id_inuse);
-		break;
-		default:
-            ;
-		}
-	}
+    const char *ref_path = NULL;
+    for (int i = 9; i < argc; ++i) {
+        if (strcmp(argv[i], "-p") == 0) {
+            if (++i < argc) {
+                sscanf(argv[i], "%d", &platform_id_inuse);
+            }
+            continue;
+        }
+        if (strcmp(argv[i], "-d") == 0) {
+            if (++i < argc) {
+                sscanf(argv[i], "%d", &device_id_inuse);
+            }
+            continue;
+        }
+        if (strcmp(argv[i], "--ref") == 0) {
+            if (++i < argc) {
+                ref_path = argv[i];
+                continue;
+            }
+            fprintf(stderr, "ERROR: --ref requires a path\n");
+            return 1;
+        }
+    }
 
     //establish seed
     int * seed = (int *) calloc(Nparticles, sizeof(int));
@@ -1134,7 +1185,11 @@ int main(int argc, char * argv[]) {
     long long endVideoSequence = get_time();
     printf("VIDEO SEQUENCE TOOK %f\n", elapsed_time(start, endVideoSequence));
     //call particle filter
-    particleFilter(I, IszX, IszY, Nfr, seed, Nparticles);
+    if (particleFilter(I, IszX, IszY, Nfr, seed, Nparticles, ref_path) != 0) {
+        free(seed);
+        free(I);
+        return 1;
+    }
     long long endParticleFilter = get_time();
     printf("PARTICLE FILTER TOOK %f\n", elapsed_time(endVideoSequence, endParticleFilter));
     printf("ENTIRE PROGRAM TOOK %f\n", elapsed_time(start, endParticleFilter));

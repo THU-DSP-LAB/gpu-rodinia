@@ -68,7 +68,12 @@ main(	int argc,
 	char* input_file_name = NULL;
     common.frames_processed = -1;
 
-    for (int i =0; i < argc; ++i) {
+    for (int i = 1; i < argc; ++i) {
+        if (argv[i][0] != '-' || argv[i][1] == '\0' || argv[i][2] != '\0') {
+            printf("Unknown option %s\n", argv[i]);
+            return 1;
+        }
+
         switch (argv[i][1]) {
         case 'f':	// -f video file
             if (++i < argc) {
@@ -87,7 +92,7 @@ main(	int argc,
             }
             break;
         case 'h':
-		    printf("%s <-f video_file> <-i input_file> <-n num_frames> [-p platform_id] [-n device_id]\n", argv[0]);
+		    printf("%s <-f video_file> <-i input_file> <-n num_frames> [-p platform_id] [-d device_id]\n", argv[0]);
             return 0;
         case 'n':   // -n number of frames
             if (++i < argc) {
@@ -113,6 +118,9 @@ main(	int argc,
                 return 1;
             }
             break;
+        default:
+            printf("Unknown option %s\n", argv[i]);
+            return 1;
         }
     }
 

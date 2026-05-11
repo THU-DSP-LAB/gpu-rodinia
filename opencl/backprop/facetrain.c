@@ -10,6 +10,8 @@ extern char *strcpy();
 extern void exit();
 
 int layer_size = 0;
+char ref_file[256] = {0};
+char export_file[256] = {0};
 
 void backprop_face()
 {
@@ -34,7 +36,7 @@ int setup(int argc, char **argv)
     int cur_arg;
 	for (cur_arg = 1; cur_arg<argc; cur_arg++) {
         if (strcmp(argv[cur_arg], "-h") == 0) {
-            fprintf(stderr, "usage: backprop <-n num of input elements> [-p platform_id] [-d device_id] [-t device_type]\n");
+            fprintf(stderr, "usage: backprop <-n num of input elements> [-p platform_id] [-d device_id] [-t device_type] [--ref ref_file] [--export export_file]\n");
             exit(0);
         }
         else if (strcmp(argv[cur_arg], "-n") == 0) {
@@ -54,6 +56,32 @@ int setup(int argc, char **argv)
                 device_id_inuse = atoi(argv[cur_arg+1]);
                 cur_arg++;
             }
+        }
+        else if (strcmp(argv[cur_arg], "--ref") == 0) {
+            if (argc >= cur_arg + 1) {
+                if(strlen(argv[cur_arg+1]) >= sizeof(ref_file) - 10) {
+                    fprintf(stderr, "--ref: file name is too long\n");
+                    exit(0);
+                }
+                strncpy(ref_file, argv[cur_arg+1], sizeof(ref_file) - 1);
+                ref_file[sizeof(ref_file) - 1] = '\0';  // Ensure null-termination
+                cur_arg++;
+            }
+        }
+        else if (strcmp(argv[cur_arg], "--export") == 0) {
+            if (argc >= cur_arg + 1) {
+                if(strlen(argv[cur_arg+1]) >= sizeof(export_file) - 10) {
+                    fprintf(stderr, "--export: file name is too long\n");
+                    exit(0);
+                }
+                strncpy(export_file, argv[cur_arg+1], sizeof(export_file) - 1);
+                export_file[sizeof(export_file) - 1] = '\0';  // Ensure null-termination
+                cur_arg++;
+            }
+        }
+        else {
+            fprintf(stderr, "Unknown option: %s\n", argv[cur_arg]);
+            exit(0);
         }
     }
 

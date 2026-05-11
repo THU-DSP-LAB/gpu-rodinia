@@ -43,6 +43,7 @@ extern "C" {
 #include <stdbool.h>				// (in path known to compiler)			needed by true/false
 #include <string.h>
 #include <time.h>
+#include <math.h>
 
 //======================================================================================================================================================150
 //	UTILITIES
@@ -70,6 +71,98 @@ extern "C" {
 int platform_id_inuse = 0;            // platform id in use (default: 0)
 int device_id_inuse = 0;              // device id in use (default : 0)
 
+#define LAVAMD_ABS_TOL 1e-3f
+#define LAVAMD_REL_TOL 1e-3f
+
+typedef struct {
+	int boxes1d;
+	unsigned int seed;
+	const char *output_file;
+	const char *ref_file;
+	const char *save_ref_file;
+} run_options;
+
+static int parse_uint_arg(const char *value, unsigned int *out_value) {
+	char *end = NULL;
+	unsigned long parsed = strtoul(value, &end, 10);
+	if (value[0] == '\0' || end == NULL || *end != '\0') {
+		return 0;
+	}
+	*out_value = (unsigned int)parsed;
+	return 1;
+}
+
+static int almost_equal(fp actual, fp expected) {
+	fp diff = fabsf(actual - expected);
+	fp scale = fmaxf(fabsf(actual), fabsf(expected));
+	return diff <= LAVAMD_ABS_TOL || diff <= LAVAMD_REL_TOL * scale;
+}
+
+static int write_results_file(const char *path, int boxes1d, unsigned int seed,
+		long space_elem, FOUR_VECTOR *fv_cpu) {
+	long i;
+	FILE *fptr = fopen(path, "w");
+	if (fptr == NULL) {
+		fprintf(stderr, "ERROR: Failed to open %s for writing\n", path);
+		return 1;
+	}
+	fprintf(fptr, "# boxes1d=%d seed=%u count=%ld\n", boxes1d, seed, space_elem);
+	for (i = 0; i < space_elem; i++) {
+		fprintf(fptr, "%.9g, %.9g, %.9g, %.9g\n",
+			fv_cpu[i].v, fv_cpu[i].x, fv_cpu[i].y, fv_cpu[i].z);
+	}
+	fclose(fptr);
+	return 0;
+}
+
+static int verify_reference(const char *path, int boxes1d, unsigned int seed,
+		long space_elem, FOUR_VECTOR *fv_cpu) {
+	long i;
+	int ref_boxes1d = 0;
+	unsigned int ref_seed = 0;
+	long ref_count = 0;
+	FILE *fptr = fopen(path, "r");
+	if (fptr == NULL) {
+		fprintf(stderr, "\033[91mFAIL\033[0m Failed to open %s for reading\n", path);
+		return 1;
+	}
+	if (fscanf(fptr, "# boxes1d=%d seed=%u count=%ld\n", &ref_boxes1d, &ref_seed, &ref_count) != 3) {
+		fprintf(stderr, "\033[91mFAIL\033[0m Invalid reference header in %s\n", path);
+		fclose(fptr);
+		return 1;
+	}
+	if (ref_boxes1d != boxes1d || ref_seed != seed || ref_count != space_elem) {
+		fprintf(stderr,
+			"\033[91mFAIL\033[0m Reference metadata mismatch in %s (boxes1d=%d seed=%u count=%ld, expected %d %u %ld)\n",
+			path, ref_boxes1d, ref_seed, ref_count, boxes1d, seed, space_elem);
+		fclose(fptr);
+		return 1;
+	}
+	for (i = 0; i < space_elem; i++) {
+		fp ref_v = 0.0f, ref_x = 0.0f, ref_y = 0.0f, ref_z = 0.0f;
+		if (fscanf(fptr, "%f, %f, %f, %f\n", &ref_v, &ref_x, &ref_y, &ref_z) != 4) {
+			fprintf(stderr, "\033[91mFAIL\033[0m Failed to parse reference %s at element %ld\n", path, i);
+			fclose(fptr);
+			return 1;
+		}
+		if (!almost_equal(fv_cpu[i].v, ref_v) ||
+			!almost_equal(fv_cpu[i].x, ref_x) ||
+			!almost_equal(fv_cpu[i].y, ref_y) ||
+			!almost_equal(fv_cpu[i].z, ref_z)) {
+			fprintf(stderr,
+				"\033[91mFAIL\033[0m Reference mismatch at element %ld\n"
+				"got=(%.8f, %.8f, %.8f, %.8f) ref=(%.8f, %.8f, %.8f, %.8f)\n",
+				i, fv_cpu[i].v, fv_cpu[i].x, fv_cpu[i].y, fv_cpu[i].z,
+				ref_v, ref_x, ref_y, ref_z);
+			fclose(fptr);
+			return 1;
+		}
+	}
+	fclose(fptr);
+	printf("\033[92mPASS\033[0m Reference check passed: %s\n", path);
+	return 0;
+}
+
 int 
 main(	int argc, 
 		char *argv [])
@@ -90,6 +183,7 @@ main(	int argc,
 	fp* qv_cpu;
 	FOUR_VECTOR* fv_cpu;
 	int nh;
+	run_options options;
 
 
 	printf("WG size of kernel = %d \n", NUMBER_THREADS);
@@ -102,6 +196,11 @@ main(	int argc,
 	dim_cpu.arch_arg = 0;
 	dim_cpu.cores_arg = 1;
 	dim_cpu.boxes1d_arg = 1;
+	options.boxes1d = 1;
+	options.seed = 7;
+	options.output_file = NULL;
+	options.ref_file = NULL;
+	options.save_ref_file = NULL;
 
 	// go through arguments
 	if (argc >= 3) {
@@ -113,6 +212,7 @@ main(	int argc,
 					// check if value is a number
 					if(isInteger(argv[dim_cpu.cur_arg+1])==1){
 						dim_cpu.boxes1d_arg = atoi(argv[dim_cpu.cur_arg+1]);
+						options.boxes1d = dim_cpu.boxes1d_arg;
 						if(dim_cpu.boxes1d_arg<0){
 							printf("ERROR: Wrong value to -boxes1d argument, cannot be <=0\n");
 							return 0;
@@ -143,10 +243,50 @@ main(	int argc,
 					dim_cpu.cur_arg = dim_cpu.cur_arg+1;
 				}
 			}
+			else if(strcmp(argv[dim_cpu.cur_arg], "--seed")==0){
+				if(argc>=dim_cpu.cur_arg+1 &&
+						parse_uint_arg(argv[dim_cpu.cur_arg+1], &options.seed)){
+					dim_cpu.cur_arg = dim_cpu.cur_arg+1;
+				}
+				else{
+					printf("ERROR: Value to --seed argument is not a valid unsigned integer\n");
+					return 1;
+				}
+			}
+			else if(strcmp(argv[dim_cpu.cur_arg], "--output")==0){
+				if(argc>=dim_cpu.cur_arg+1){
+					options.output_file = argv[dim_cpu.cur_arg+1];
+					dim_cpu.cur_arg = dim_cpu.cur_arg+1;
+				}
+				else{
+					printf("ERROR: Missing value to --output argument\n");
+					return 1;
+				}
+			}
+			else if(strcmp(argv[dim_cpu.cur_arg], "--ref")==0){
+				if(argc>=dim_cpu.cur_arg+1){
+					options.ref_file = argv[dim_cpu.cur_arg+1];
+					dim_cpu.cur_arg = dim_cpu.cur_arg+1;
+				}
+				else{
+					printf("ERROR: Missing value to --ref argument\n");
+					return 1;
+				}
+			}
+			else if(strcmp(argv[dim_cpu.cur_arg], "--save-ref")==0){
+				if(argc>=dim_cpu.cur_arg+1){
+					options.save_ref_file = argv[dim_cpu.cur_arg+1];
+					dim_cpu.cur_arg = dim_cpu.cur_arg+1;
+				}
+				else{
+					printf("ERROR: Missing value to --save-ref argument\n");
+					return 1;
+				}
+			}
 			// unknown
 			else{
 				printf("ERROR: Unknown argument\n");
-				return 0;
+				return 1;
 			}
 		}
 		// Print configuration
@@ -250,7 +390,7 @@ main(	int argc,
 	//====================================================================================================100
 
 	// random generator seed set to random value - time in this case
-	srand(time(NULL));
+	srand(options.seed);
 
 	// input (distances)
 	rv_cpu = (FOUR_VECTOR*)malloc(dim_cpu.space_mem);
@@ -300,15 +440,24 @@ main(	int argc,
 	//	SYSTEM MEMORY DEALLOCATION
 	//======================================================================================================================================================150
 
-	// dump results
-#ifdef OUTPUT
-        FILE *fptr;
-	fptr = fopen("result.txt", "w");	
-	for(i=0; i<dim_cpu.space_elem; i=i+1){
-        	fprintf(fptr, "%f, %f, %f, %f\n", fv_cpu[i].v, fv_cpu[i].x, fv_cpu[i].y, fv_cpu[i].z);
+	if (options.output_file != NULL &&
+			write_results_file(options.output_file, dim_cpu.boxes1d_arg, options.seed,
+				dim_cpu.space_elem, fv_cpu) != 0) {
+		return 1;
 	}
-	fclose(fptr);
-#endif       	
+	if (options.save_ref_file != NULL &&
+			write_results_file(options.save_ref_file, dim_cpu.boxes1d_arg, options.seed,
+				dim_cpu.space_elem, fv_cpu) != 0) {
+		return 1;
+	}
+	if (options.save_ref_file != NULL) {
+		printf("Reference saved to %s\n", options.save_ref_file);
+	}
+	if (options.ref_file != NULL &&
+			verify_reference(options.ref_file, dim_cpu.boxes1d_arg, options.seed,
+				dim_cpu.space_elem, fv_cpu) != 0) {
+		return 1;
+	}
 
 
 	free(rv_cpu);

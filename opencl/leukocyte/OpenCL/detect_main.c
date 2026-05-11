@@ -1,17 +1,76 @@
 #include "find_ellipse.h"
 #include "track_ellipse.h"
 
+#include <math.h>
+#include <string.h>
+
 // Global variables used by OpenCL functions
 cl_context context;
 cl_command_queue command_queue;
 cl_device_id device;
 
+static const double RESULT_TOLERANCE = 1e-4;
+
+static int verify_reference_file(const char *result_path, const char *reference_path) {
+	FILE *result = fopen(result_path, "r");
+	FILE *reference = fopen(reference_path, "r");
+	if (result == NULL || reference == NULL) {
+		fprintf(stderr, "Error: failed to open result/reference file (%s, %s)\n", result_path, reference_path);
+		if (result != NULL) fclose(result);
+		if (reference != NULL) fclose(reference);
+		return -1;
+	}
+
+	for (;;) {
+		int result_cell;
+		int reference_cell;
+		double result_x, result_y, reference_x, reference_y;
+		int result_status = fscanf(result, "%d,%lf,%lf", &result_cell, &result_x, &result_y);
+		int reference_status = fscanf(reference, "%d,%lf,%lf", &reference_cell, &reference_x, &reference_y);
+		if (result_status == EOF && reference_status == EOF) break;
+		if (result_status != 3 || reference_status != 3) {
+			fprintf(stderr, "\033[91mFAIL\033[0m malformed result/reference file (%s, %s)\n", result_path, reference_path);
+			fclose(result);
+			fclose(reference);
+			return -1;
+		}
+		if (result_cell != reference_cell ||
+		    fabs(result_x - reference_x) > RESULT_TOLERANCE ||
+		    fabs(result_y - reference_y) > RESULT_TOLERANCE) {
+			fprintf(stderr,
+			        "\033[91mFAIL\033[0m Reference mismatch for %s at cell %d\n"
+			        "  expected: %d,%.10f,%.10f\n"
+			        "  actual:   %d,%.10f,%.10f\n",
+			        reference_path,
+			        reference_cell,
+			        reference_cell, reference_x, reference_y,
+			        result_cell, result_x, result_y);
+			fclose(result);
+			fclose(reference);
+			return -1;
+		}
+	}
+
+	fclose(result);
+	fclose(reference);
+	printf("\033[92mPASS\033[0m Reference matched: %s\n", reference_path);
+	return 0;
+}
+
 int main(int argc, char ** argv) {
+	const char *reference_path = NULL;
 	
 	// Make sure the command line arguments have been specified
-	if (argc !=3)	{
-		fprintf(stderr, "Usage: %s <input file> <number of frames to process>", argv[0]);
+	if (argc != 3 && argc != 5)	{
+		fprintf(stderr, "Usage: %s <input file> <number of frames to process> [--ref path]", argv[0]);
 		exit(EXIT_FAILURE);
+	}
+	if (argc == 5) {
+		if (strcmp(argv[3], "--ref") != 0) {
+			fprintf(stderr, "Usage: %s <input file> <number of frames to process> [--ref path]", argv[0]);
+			exit(EXIT_FAILURE);
+		}
+		reference_path = argv[4];
 	}
 
 	// Choose the best GPU in case there are multiple available
@@ -249,6 +308,9 @@ int main(int argc, char ** argv) {
 	
 	// Report total program execution time
     printf("\nTotal application run time: %.5f seconds\n", ((float) (get_time() - program_start_time)) / (1000*1000));
+	if (reference_path != NULL && verify_reference_file("result.txt", reference_path) != 0) {
+		return EXIT_FAILURE;
+	}
 
 	return 0;
 }

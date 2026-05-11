@@ -662,25 +662,25 @@ __kernel void cl_fdwt53Kernel(__global const int * const in,
                               int WIN_SIZE_Y)
 {
 	__local struct FDWT53 fdwt53;
-    fdwt53.WIN_SIZE_X = WIN_SIZE_X;
-    fdwt53.WIN_SIZE_Y = WIN_SIZE_Y;
-	
-	//initialize
-    //Lingjie Zhang modified on 11/02/2015
-	//for(int i = 0; i < sizeof(fdwt53.buffer)/sizeof(int); i++){
-	for(int i = 0; i < sizeof(fdwt53.buffer.data)/sizeof(int); i++){
+
+	if(get_local_id(0) == 0)
+	{
+	    fdwt53.WIN_SIZE_X = WIN_SIZE_X;
+	    fdwt53.WIN_SIZE_Y = WIN_SIZE_Y;
+		fdwt53.buffer.SIZE_X = fdwt53.WIN_SIZE_X;
+		fdwt53.buffer.SIZE_Y = fdwt53.WIN_SIZE_Y + 3;
+		fdwt53.buffer.VERTICAL_STRIDE = BOUNDARY_X + (fdwt53.buffer.SIZE_X / 2);//BOUNDARY = 2
+		fdwt53.buffer.SHM_BANKS = 32;  // SHM_BANKS = ((__CUDA_ARCH__ >= 200) ? 32 : 16)
+		fdwt53.buffer.BUFFER_SIZE = fdwt53.buffer.VERTICAL_STRIDE * fdwt53.buffer.SIZE_Y;
+		fdwt53.buffer.PADDING = fdwt53.buffer.SHM_BANKS - ((fdwt53.buffer.BUFFER_SIZE + fdwt53.buffer.SHM_BANKS / 2) % fdwt53.buffer.SHM_BANKS) ;
+		fdwt53.buffer.ODD_OFFSET = fdwt53.buffer.BUFFER_SIZE + fdwt53.buffer.PADDING ;
+		fdwt53.STRIDE = fdwt53.buffer.VERTICAL_STRIDE ;
+	}
+
+	for(int i = get_local_id(0); i < sizeof(fdwt53.buffer.data)/sizeof(int); i += get_local_size(0)){
 		fdwt53.buffer.data[i] = 0;
 	}
-    //end of Lingjie Zhang modification
-	
-	fdwt53.buffer.SIZE_X = fdwt53.WIN_SIZE_X;
-	fdwt53.buffer.SIZE_Y = fdwt53.WIN_SIZE_Y + 3;
-	fdwt53.buffer.VERTICAL_STRIDE = BOUNDARY_X + (fdwt53.buffer.SIZE_X / 2);//BOUNDARY = 2  
-	fdwt53.buffer.SHM_BANKS = 32;  // SHM_BANKS = ((__CUDA_ARCH__ >= 200) ? 32 : 16)
-	fdwt53.buffer.BUFFER_SIZE = fdwt53.buffer.VERTICAL_STRIDE * fdwt53.buffer.SIZE_Y;
-	fdwt53.buffer.PADDING = fdwt53.buffer.SHM_BANKS - ((fdwt53.buffer.BUFFER_SIZE + fdwt53.buffer.SHM_BANKS / 2) % fdwt53.buffer.SHM_BANKS) ;
-	fdwt53.buffer.ODD_OFFSET = fdwt53.buffer.BUFFER_SIZE + fdwt53.buffer.PADDING ;
-	fdwt53.STRIDE = fdwt53.buffer.VERTICAL_STRIDE ; 
+	barrier(CLK_LOCAL_MEM_FENCE);
 
 	const int maxX = (get_group_id(0) + 1) * WIN_SIZE_X + 1;
     const int maxY = (get_group_id(1) + 1) * WIN_SIZE_Y * steps + 1;

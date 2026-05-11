@@ -1,5 +1,110 @@
 #include "hotspot.h"
 
+#include <math.h>
+
+#define HOTSPOT_ABS_TOL 1e-3f
+#define HOTSPOT_REL_TOL 1e-3f
+
+typedef struct {
+	int platform_id;
+	int device_id;
+	const char *ref_file;
+	const char *save_ref_file;
+} hotspot_options;
+
+static int load_reference(float *values, int count, const char *file) {
+	int i;
+	FILE *fp = fopen(file, "r");
+	if (fp == NULL) {
+		fprintf(stderr, "Failed to open reference file %s\n", file);
+		return -1;
+	}
+	for (i = 0; i < count; ++i) {
+		int index = -1;
+		float value = 0.0f;
+		if (fscanf(fp, "%d%f", &index, &value) != 2) {
+			fprintf(stderr, "Failed to parse reference file %s at element %d\n", file, i);
+			fclose(fp);
+			return -1;
+		}
+		if (index != i) {
+			fprintf(stderr, "\033[91mFAIL\033[0m Reference index mismatch in %s: got %d, expected %d\n", file, index, i);
+			fclose(fp);
+			return -1;
+		}
+		values[i] = value;
+	}
+	fclose(fp);
+	return 0;
+}
+
+static int almost_equal(float actual, float expected) {
+	float diff = fabsf(actual - expected);
+	float scale = fmaxf(fabsf(actual), fabsf(expected));
+	return diff <= HOTSPOT_ABS_TOL || diff <= HOTSPOT_REL_TOL * scale;
+}
+
+static int verify_reference(const float *actual, int count, const char *file) {
+	int i;
+	float *reference = (float *)malloc((size_t)count * sizeof(float));
+	if (reference == NULL) {
+		fprintf(stderr, "Failed to allocate reference buffer\n");
+		return -1;
+	}
+	if (load_reference(reference, count, file) != 0) {
+		free(reference);
+		return -1;
+	}
+	for (i = 0; i < count; ++i) {
+		if (!almost_equal(actual[i], reference[i])) {
+			fprintf(stderr,
+					"\033[91mFAIL\033[0m Reference mismatch at index %d: got %.8f expected %.8f\n",
+					i, actual[i], reference[i]);
+			free(reference);
+			return -1;
+		}
+	}
+	free(reference);
+	printf("\033[92mPASS\033[0m Reference check passed: %s\n", file);
+	return 0;
+}
+
+static void parse_optional_args(int argc, char **argv, hotspot_options *options) {
+	int cur_arg;
+	options->platform_id = 0;
+	options->device_id = 0;
+	options->ref_file = NULL;
+	options->save_ref_file = NULL;
+	for (cur_arg = 7; cur_arg < argc; ++cur_arg) {
+		if (strcmp(argv[cur_arg], "-h") == 0) {
+			usage(argc, argv);
+		} else if (strcmp(argv[cur_arg], "-p") == 0) {
+			if (cur_arg + 1 >= argc) {
+				usage(argc, argv);
+			}
+			options->platform_id = atoi(argv[++cur_arg]);
+		} else if (strcmp(argv[cur_arg], "-d") == 0) {
+			if (cur_arg + 1 >= argc) {
+				usage(argc, argv);
+			}
+			options->device_id = atoi(argv[++cur_arg]);
+		} else if (strcmp(argv[cur_arg], "--ref") == 0) {
+			if (cur_arg + 1 >= argc) {
+				usage(argc, argv);
+			}
+			options->ref_file = argv[++cur_arg];
+		} else if (strcmp(argv[cur_arg], "--save-ref") == 0) {
+			if (cur_arg + 1 >= argc) {
+				usage(argc, argv);
+			}
+			options->save_ref_file = argv[++cur_arg];
+		} else {
+			fprintf(stderr, "Unknown option: %s\n", argv[cur_arg]);
+			usage(argc, argv);
+		}
+	}
+}
+
 //Primitives for timing
 #ifdef TIMING
 #include "timing.h"
@@ -143,7 +248,7 @@ int compute_tran_temp(cl_mem MatrixPower, cl_mem MatrixTemp[2], int col, int row
 }
 
 void usage(int argc, char **argv) {
-	fprintf(stderr, "Usage: %s <grid_rows/grid_cols> <pyramid_height> <sim_time> <temp_file> <power_file> <output_file> [-p platform_id] [-d device_id]\n", argv[0]);
+	fprintf(stderr, "Usage: %s <grid_rows/grid_cols> <pyramid_height> <sim_time> <temp_file> <power_file> <output_file> [-p platform_id] [-d device_id] [--ref ref_file] [--save-ref ref_file]\n", argv[0]);
 	fprintf(stderr, "\t<grid_rows/grid_cols>  - number of rows/cols in the grid (positive integer)\n");
 	fprintf(stderr, "\t<pyramid_height> - pyramid heigh(positive integer)\n");
 	fprintf(stderr, "\t<sim_time>   - number of iterations\n");
@@ -179,27 +284,9 @@ int main(int argc, char** argv) {
     size=grid_rows*grid_cols;
 
     // OCL config
-    int platform_id_inuse = 0;            // platform id in use (default: 0)
-    int device_id_inuse = 0;              //device id in use (default : 0)
+    hotspot_options options;
+    parse_optional_args(argc, argv, &options);
     cl_device_type device_type = CL_DEVICE_TYPE_GPU;
-
-    int cur_arg;
-	for (cur_arg = 1; cur_arg<argc; cur_arg++) {
-        if (strcmp(argv[cur_arg], "-h") == 0) 
-		    usage(argc, argv);
-        else if (strcmp(argv[cur_arg], "-p") == 0) {
-            if (argc >= cur_arg + 1) {
-                platform_id_inuse = atoi(argv[cur_arg+1]);
-                cur_arg++;
-            }
-        }
-        else if (strcmp(argv[cur_arg], "-d") == 0) {
-            if (argc >= cur_arg + 1) {
-                device_id_inuse = atoi(argv[cur_arg+1]);
-                cur_arg++;
-            }
-        }
-    }
 
     // --------------- pyramid parameters --------------- 
     int borderCols = (pyramid_height)*EXPAND_RATE/2;
@@ -237,7 +324,7 @@ int main(int argc, char** argv) {
     if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
 	
 	// Print the chosen platform (if there are multiple platforms, choose the first one)
-	cl_platform_id platform = platforms[platform_id_inuse];
+	cl_platform_id platform = platforms[options.platform_id];
 	char pbuf[100];
 	error = clGetPlatformInfo(platform, CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf, NULL);
 	if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
@@ -248,15 +335,15 @@ int main(int argc, char** argv) {
 	error = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, NULL, &devices_size);
     if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
 	printf("num_devices = %d\n", devices_size);
-    if (device_id_inuse > devices_size) {
+    if (options.device_id > devices_size) {
         printf("Invalid Device Number\n");
-    	if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
+        if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
     }
 	cl_device_id *devices = (cl_device_id *)malloc(sizeof(cl_device_id)*devices_size);
     error = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, devices_size, devices, NULL);
     if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
 
-	device = devices[device_id_inuse];
+	device = devices[options.device_id];
 	error = clGetDeviceInfo(device, CL_DEVICE_NAME, sizeof(pbuf), pbuf, NULL);
 	if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
 	printf("Device: %s\n", pbuf);
@@ -357,6 +444,13 @@ int main(int argc, char** argv) {
 
 	// Write final output to output file
     writeoutput(MatrixOut, grid_rows, grid_cols, ofile);
+    if (options.save_ref_file != NULL) {
+        writeoutput(MatrixOut, grid_rows, grid_cols, (char *)options.save_ref_file);
+        printf("Reference saved to %s\n", options.save_ref_file);
+    }
+    if (options.ref_file != NULL && verify_reference(MatrixOut, size, options.ref_file) != 0) {
+        return 1;
+    }
 
 #ifdef  TIMING
 	gettimeofday(&tv_close_start, NULL);

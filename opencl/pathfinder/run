@@ -1,3 +1,9 @@
 #!/bin/bash
 
-./pathfinder.out -c 100000 -r 100 -h 20 $@
+# Small smoke:
+# ./pathfinder.out -c 32 -r 4 -h 1 -p 0 -d 0
+#
+# Rodinia large reference:
+# ./pathfinder.out -c 100000 -r 100 -h 20 $@
+#
+./pathfinder.out -c 64 -r 32 -h 4 -p 0 -d 0

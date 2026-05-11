@@ -92,8 +92,6 @@ void clCmdParams(int argc, char* argv[]) {
 int main(int argc, char** argv)
 {
 //    int err;                            // error code returned from api calls
-    
-    unsigned int correct;               // number of correct results returned
 
     size_t global;                      // global domain size for our calculation
     size_t local;                       // local domain size for our calculation
@@ -105,6 +103,11 @@ int main(int argc, char** argv)
     
     int numElements = 0 ;
         
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s r|<input-file> [-p platform] [-d device]\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+
     if(strcmp(argv[1],"r") ==0) {
         numElements = SIZE;
 	}
@@ -156,15 +159,18 @@ int main(int argc, char** argv)
             datamin = fminf(cpu_idata[i], datamin);
             datamax = fmaxf(cpu_idata[i],datamax);
         }
+        fclose(fp);
 	}
+#ifdef OUTPUT
     FILE *tp;
     const char filename2[]="./hybridinput.txt";
     tp = fopen(filename2,"w");
-    for(int i = 0; i < SIZE; i++) {
+    for(int i = 0; i < numElements; i++) {
         fprintf(tp,"%f ",cpu_idata[i]);
     }
 
     fclose(tp);
+#endif
     memcpy(cpu_odata, cpu_idata, mem_size);
 
     /* bucketsort */
@@ -268,9 +274,12 @@ int main(int argc, char** argv)
 			count++;
 			break;
 		}
-    }
+	}
 	if(count == 0) printf("PASSED.\n");
-	else printf("FAILED.\n");
+	else {
+        printf("FAILED.\n");
+        return EXIT_FAILURE;
+    }
 #endif
     
 #ifdef OUTPUT
@@ -292,6 +301,5 @@ int main(int argc, char** argv)
 //    printf("%d \n", summy);
     return 0;
 }
-
 
 

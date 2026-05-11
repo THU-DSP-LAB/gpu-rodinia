@@ -1,3 +1,4 @@
 #!/bin/bash
 
-./backprop.out -n 16 $@
+#./backprop.out -n 16 --ref nvidia-result-n16 $@
+./backprop.out -n 1024 --ref nvidia-result-n1024 $@

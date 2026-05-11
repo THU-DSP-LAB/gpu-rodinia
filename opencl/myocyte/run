@@ -1,1 +1,15 @@
-./myocyte.out -time 500 -r ../../data/myocyte
+#!/bin/bash
+
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+
+"${SCRIPT_DIR}/myocyte.out" \
+  -time 1 \
+  -r "${SCRIPT_DIR}/../../data/myocyte" \
+  -p 0 \
+  -d 0
+
+python3 "${SCRIPT_DIR}/validate_output.py" \
+  --reference "${SCRIPT_DIR}/nvidia-output-time1.txt" \
+  --output "${SCRIPT_DIR}/output.txt"

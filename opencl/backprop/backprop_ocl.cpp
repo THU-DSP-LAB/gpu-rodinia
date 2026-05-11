@@ -1,4 +1,5 @@
 // includes, system
+#include <cstdlib>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,6 +18,10 @@
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
+
+// golden reference result file name
+extern char ref_file[256];
+extern char export_file[256];
 
 // local variables
 static cl_context	    context;
@@ -120,6 +125,41 @@ main( int argc, char** argv)
 	setup(argc, argv);
 }
 
+bool almost_equal(
+    float a, float b, 
+    float abs_eps = 1e-6f,
+    float rel_eps = 0.002f
+) {
+    float diff = std::fabs(a - b);
+    if (diff <= abs_eps) {
+        return true;
+    }
+    // 相对误差：diff / max(|a|, |b|)
+    float max_ab = std::fmax(std::fabs(a), std::fabs(b));
+    return diff <= rel_eps * max_ab;
+}
+
+void print_weights(const BPNN *net) {
+	int in = net->input_n;
+	int hid = net->hidden_n;
+	int out = net->output_n;
+	printf("in = %d, hidden = %d, out = %d\n", in, hid, out);
+	printf("Input weights:\n");
+	for (int k = 0; k <= in; k++) {
+		for (int j = 0; j <= hid; j++) {
+			printf("%e ", net->input_weights[k][j]);
+		}
+		putchar('\n');
+	}
+	printf("Hidden weights:\n");
+	for (int k = 0; k <= hid; k++) {
+		for (int j = 0; j <= out; j++) {
+			printf("%e ", net->hidden_weights[k][j]);
+		}
+		putchar('\n');
+	}
+
+}
 
 int bpnn_train_kernel(BPNN *net, float *eo, float *eh)
 {
@@ -129,6 +169,8 @@ int bpnn_train_kernel(BPNN *net, float *eo, float *eh)
 	in = net->input_n;
 	hid = net->hidden_n;
 	out = net->output_n;
+
+	// print_weights(net);
 
 	int sourcesize = 1024*1024;
 	char * source = (char *)calloc(sourcesize, sizeof(char));
@@ -181,7 +223,7 @@ int bpnn_train_kernel(BPNN *net, float *eo, float *eh)
     float *input_weights_prev_one_dim;
 	float * partial_sum;
 	float sum;
-	float num_blocks = in / BLOCK_SIZE;
+	int num_blocks = (in + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
 	input_weights_one_dim = (float *) malloc((in + 1)* (hid + 1) * sizeof(float));
 	input_weights_prev_one_dim = (float *) malloc((in + 1)* (hid + 1) * sizeof(float));
@@ -208,6 +250,8 @@ int bpnn_train_kernel(BPNN *net, float *eo, float *eh)
 	cl_mem hidden_partial_sum;
 	cl_mem hidden_delta_ocl;
 	cl_mem input_prev_weights_ocl;
+	// cl_mem input_node;
+	// cl_mem weight_matrix;
 
 #ifdef  TIMING
     gettimeofday(&tv_mem_alloc_start, NULL);
@@ -224,6 +268,10 @@ int bpnn_train_kernel(BPNN *net, float *eo, float *eh)
 	if(err != CL_SUCCESS) { printf("ERROR: clCreateBuffer hidden_delta_ocl\n"); return -1;}
 	input_prev_weights_ocl = clCreateBuffer(context, CL_MEM_READ_WRITE, (in + 1) * (hid + 1) * sizeof(float), NULL, &err );
 	if(err != CL_SUCCESS) { printf("ERROR: clCreateBuffer input_prev_weights_ocl\n"); return -1;}
+	// input_node = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * HEIGHT, NULL, &err );
+	// if(err != CL_SUCCESS) { printf("ERROR: clCreateBuffer input_node\n"); return -1;}
+	// weight_matrix = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float)*HEIGHT*WIDTH, NULL, &err );
+	// if(err != CL_SUCCESS) { printf("ERROR: clCreateBuffer weight_matrix\n"); return -1;}
 #ifdef  TIMING
     gettimeofday(&tv_mem_alloc_end, NULL);
     tvsub(&tv_mem_alloc_end, &tv_mem_alloc_start, &tv);
@@ -251,10 +299,10 @@ int bpnn_train_kernel(BPNN *net, float *eo, float *eh)
 	clSetKernelArg(kernel1, 1, sizeof(void *), (void*) &output_hidden_ocl);
 	clSetKernelArg(kernel1, 2, sizeof(void *), (void*) &input_hidden_ocl);
 	clSetKernelArg(kernel1, 3, sizeof(void *), (void*) &hidden_partial_sum );
-	clSetKernelArg(kernel1, 4, sizeof(float) *  HEIGHT, (void*)NULL );
-	clSetKernelArg(kernel1, 5, sizeof(float ) *  HEIGHT * WIDTH, (void*)NULL );
-	clSetKernelArg(kernel1, 6, sizeof(cl_int), (void*) &in);
-	clSetKernelArg(kernel1, 7, sizeof(cl_int), (void*) &hid);
+	// clSetKernelArg(kernel1, 4, sizeof(float) *  HEIGHT, (void*)NULL );
+	// clSetKernelArg(kernel1, 5, sizeof(float ) *  HEIGHT * WIDTH, (void*)NULL );
+	clSetKernelArg(kernel1, 4, sizeof(cl_int), (void*) &in);
+	clSetKernelArg(kernel1, 5, sizeof(cl_int), (void*) &hid);
 
 	err = clEnqueueNDRangeKernel(cmd_queue, kernel1, 2, NULL, global_work, local_work, 0, 0, &event);
 	if(err != CL_SUCCESS) { printf("ERROR: 1  clEnqueueNDRangeKernel()=>%d failed\n", err); return -1; }
@@ -269,6 +317,10 @@ int bpnn_train_kernel(BPNN *net, float *eo, float *eh)
     d2h_time += probe_event_time(event,cmd_queue);
 #endif
     clReleaseEvent(event);
+
+    // FILE* kernel1_out_fp = fopen("kernel1_out.bin", "w");
+    // fwrite(partial_sum, sizeof(float), num_blocks * WIDTH, kernel1_out_fp);
+    // fclose(kernel1_out_fp);
 
 	for (int j = 1; j <= hid; j++) {
 		sum = 0.0;
@@ -334,35 +386,67 @@ int bpnn_train_kernel(BPNN *net, float *eo, float *eh)
 	gettimeofday(&tv_close_start, NULL);
 #endif
 
+	for (int temp = 0, k = 0; k <= in; k++) {
+		for (int j = 0; j <= hid; j++) {
+			net->input_weights[k][j] = input_weights_one_dim[temp];
+			temp++;
+		}
+	}
+
 	clReleaseMemObject(input_ocl);
 	clReleaseMemObject(output_hidden_ocl);
 	clReleaseMemObject(input_hidden_ocl);
 	clReleaseMemObject(hidden_partial_sum);
 	clReleaseMemObject(input_prev_weights_ocl);
 
-	// bpnn_save(net, "save_res.txt");
-	// ********** compare the result **********
-	BPNN *new_net;
-	new_net = bpnn_read("save_res.txt");
-	int m2 = 0;
-	for (int k = 0; k <= in; k++) {
-		for (int j = 0; j <= hid; j++) {
-			if (input_weights_one_dim[m2] != new_net->input_weights[k][j]) {
-				printf("%d - right : %f; res : %f\n", m2, new_net->input_weights[k][j], input_weights_one_dim[m2]);
-				exit(1);
-			}
-			m2++;
-		}
+	// ********** export the result **********
+	if(export_file[0]) {
+		bpnn_save(net, export_file);
 	}
 
-	for (int k = 0; k <= hid; k++) {
-		for (int j = 0; j <= out; j++) {
-			if (net->input_weights[k][j] != new_net->input_weights[k][j]) {
-				printf("%d-%d - right : %f; res : %f\n", k, j, new_net->input_weights[k][j], net->input_weights[k][j]);
-				exit(1);
+	// ********** compare the result **********
+	if(ref_file[0]) {
+		BPNN *new_net;
+		new_net = bpnn_read(ref_file);
+		if (!new_net) {
+			printf("ERROR: failed to get reference data from %s\n", ref_file);
+			exit(EXIT_FAILURE);
+		}
+		if(new_net->input_n != in || new_net->hidden_n != hid || new_net->output_n != out) {
+			printf("ERROR: reference file %s has different network size\n", ref_file);
+			printf("Expected: in = %d, hid = %d, out = %d\n", in, hid, out);
+			printf("Got: in = %d, hid = %d, out = %d\n", new_net->input_n, new_net->hidden_n, new_net->output_n);
+			exit(EXIT_FAILURE);
+		}
+		for (int k = 0; k <= in; k++) {
+			for (int j = 0; j <= hid; j++) {
+				if (!almost_equal(net->input_weights[k][j], new_net->input_weights[k][j])) {
+					printf("\033[91mFAIL\033[0m input_weights[%d][%d] mismatch with reference file %s\n", k, j, ref_file);
+					printf(" - REF=%f; DUT=%f\n", new_net->input_weights[k][j], net->input_weights[k][j]);
+					puts("==== REF data ====");
+					print_weights(new_net);
+					puts("==== DUT data ====");
+					print_weights(net);
+					exit(EXIT_FAILURE);
+				}
 			}
 		}
+		for (int k = 0; k <= hid; k++) {
+			for (int j = 0; j <= out; j++) {
+				if (!almost_equal(net->hidden_weights[k][j], new_net->hidden_weights[k][j])) {
+					printf("\033[91mFAIL\033[0m hidden_weights[%d][%d] mismatch with reference file %s\n", k, j, ref_file);
+					printf(" - REF=%f; DUT=%f\n", new_net->hidden_weights[k][j], net->hidden_weights[k][j]);
+					puts("==== REF data ====");
+					print_weights(new_net);
+					puts("==== DUT data ====");
+					print_weights(net);
+					exit(EXIT_FAILURE);
+				}
+			}
+		}
+		printf("All weights match with reference file %s, \033[92mPASS\033[0m!\n", ref_file);
 	}
+	// print_weights(net);
 
 	free(input_weights_prev_one_dim);
 	free(partial_sum);
