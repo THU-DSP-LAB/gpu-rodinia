@@ -182,7 +182,7 @@ int main(int argc, char* argv[])
     */
 
 #ifdef  TIMING
-  gettimeofday(&tv_kernel_start, NULL);
+    gettimeofday(&tv_kernel_start, NULL);
 #endif
 
     euclid<<< gridDim, threadsPerBlock >>>(d_locations,d_distances,numRecords,options.lat,options.lng);
