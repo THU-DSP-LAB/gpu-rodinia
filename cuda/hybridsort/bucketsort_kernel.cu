@@ -13,8 +13,6 @@
 #define BUCKET_BLOCK_MEMORY		(DIVISIONS * BUCKET_WARP_N)
 #define BUCKET_BAND				128
 
-texture<float, 1, cudaReadModeElementType> texPivot; 
-
 __device__ int addOffset(volatile unsigned int *s_offset, unsigned int data, unsigned int threadTag){
     unsigned int count;
 
@@ -28,7 +26,7 @@ __device__ int addOffset(volatile unsigned int *s_offset, unsigned int data, uns
 }
 
 __global__ void
-bucketcount( float *input, int *indice, unsigned int *d_prefixoffsets, int size)
+bucketcount( float *input, int *indice, unsigned int *d_prefixoffsets, int size, const float *pivotPoints)
 {
 	volatile __shared__ unsigned int s_offset[BUCKET_BLOCK_MEMORY]; 
 
@@ -45,11 +43,11 @@ bucketcount( float *input, int *indice, unsigned int *d_prefixoffsets, int size)
 
 		int idx  = DIVISIONS/2 - 1; 
 		int jump = DIVISIONS/4; 
-		float piv = tex1Dfetch(texPivot, idx); //s_pivotpoints[idx]; 
+		float piv = pivotPoints[idx]; //s_pivotpoints[idx]; 
 
 		while(jump >= 1){
 			idx = (elem < piv) ? (idx - jump) : (idx + jump);
-			piv = tex1Dfetch(texPivot, idx); //s_pivotpoints[idx]; 
+			piv = pivotPoints[idx]; //s_pivotpoints[idx]; 
 			jump /= 2; 
 		}
 		idx = (elem < piv) ? idx : (idx + 1); 

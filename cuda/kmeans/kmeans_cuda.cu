@@ -78,20 +78,9 @@ void allocateMemory(int npoints, int nfeatures, int nclusters, float **features)
 	cudaMalloc((void**) &clusters_d, nclusters*nfeatures*sizeof(float));
 
 	
-#ifdef BLOCK_DELTA_REDUCE
-	// allocate array to hold the per block deltas on the gpu side
-	
-	cudaMalloc((void**) &block_deltas_d, num_blocks_perdim * num_blocks_perdim * sizeof(int));
-	//cudaMemcpy(block_delta_d, &delta_h, sizeof(int), cudaMemcpyHostToDevice);
-#endif
+cudaMalloc((void**) &block_deltas_d, sizeof(int));
 
-#ifdef BLOCK_CENTER_REDUCE
-	// allocate memory and copy to card cluster  array in which to accumulate center points for the next iteration
-	cudaMalloc((void**) &block_clusters_d, 
-        num_blocks_perdim * num_blocks_perdim * 
-        nclusters * nfeatures * sizeof(float));
-	//cudaMemcpy(new_clusters_d, new_centers[0], nclusters*nfeatures*sizeof(float), cudaMemcpyHostToDevice);
-#endif
+cudaMalloc((void**) &block_clusters_d, sizeof(float));
 
 }
 /* -------------- allocateMemory() end ------------------- */
@@ -108,12 +97,8 @@ void deallocateMemory()
 	cudaFree(membership_d);
 
 	cudaFree(clusters_d);
-#ifdef BLOCK_CENTER_REDUCE
-    cudaFree(block_clusters_d);
-#endif
-#ifdef BLOCK_DELTA_REDUCE
+cudaFree(block_clusters_d);
     cudaFree(block_deltas_d);
-#endif
 }
 /* -------------- deallocateMemory() end ------------------- */
 
@@ -126,7 +111,7 @@ int
 main( int argc, char** argv) 
 {
 	// make sure we're running on the big card
-    cudaSetDevice(1);
+    cudaSetDevice(0);
 	// as done in the CUDA start/help document provided
 	setup(argc, argv);    
 }
@@ -152,7 +137,7 @@ kmeansCuda(float  **feature,				/* in: [npoints][nfeatures] */
 	int i,j;				/* counters */
 
 
-	cudaSetDevice(1);
+	cudaSetDevice(0);
 
 	/* copy membership (host to device) */
 	cudaMemcpy(membership_d, membership_new, npoints*sizeof(int), cudaMemcpyHostToDevice);
@@ -160,33 +145,13 @@ kmeansCuda(float  **feature,				/* in: [npoints][nfeatures] */
 	/* copy clusters (host to device) */
 	cudaMemcpy(clusters_d, clusters[0], nclusters*nfeatures*sizeof(float), cudaMemcpyHostToDevice);
 
-	/* set up texture */
-    cudaChannelFormatDesc chDesc0 = cudaCreateChannelDesc<float>();
-    t_features.filterMode = cudaFilterModePoint;   
-    t_features.normalized = false;
-    t_features.channelDesc = chDesc0;
+	/* Legacy texture references are replaced with direct global-memory loads. */
 
-	if(cudaBindTexture(NULL, &t_features, feature_d, &chDesc0, npoints*nfeatures*sizeof(float)) != CUDA_SUCCESS)
-        printf("Couldn't bind features array to texture!\n");
-
-	cudaChannelFormatDesc chDesc1 = cudaCreateChannelDesc<float>();
-    t_features_flipped.filterMode = cudaFilterModePoint;   
-    t_features_flipped.normalized = false;
-    t_features_flipped.channelDesc = chDesc1;
-
-	if(cudaBindTexture(NULL, &t_features_flipped, feature_flipped_d, &chDesc1, npoints*nfeatures*sizeof(float)) != CUDA_SUCCESS)
-        printf("Couldn't bind features_flipped array to texture!\n");
-
-	cudaChannelFormatDesc chDesc2 = cudaCreateChannelDesc<float>();
-    t_clusters.filterMode = cudaFilterModePoint;   
-    t_clusters.normalized = false;
-    t_clusters.channelDesc = chDesc2;
-
-	if(cudaBindTexture(NULL, &t_clusters, clusters_d, &chDesc2, nclusters*nfeatures*sizeof(float)) != CUDA_SUCCESS)
-        printf("Couldn't bind clusters array to texture!\n");
 
 	/* copy clusters to constant memory */
-	cudaMemcpyToSymbol("c_clusters",clusters[0],nclusters*nfeatures*sizeof(float),0,cudaMemcpyHostToDevice);
+	float c_clusters_host[ASSUMED_NR_CLUSTERS*34] = {0.0f};
+	memcpy(c_clusters_host, clusters[0], nclusters*nfeatures*sizeof(float));
+	cudaMemcpyToSymbol(c_clusters, c_clusters_host, sizeof(c_clusters_host), 0, cudaMemcpyHostToDevice);
 
 
     /* setup execution parameters.
@@ -204,7 +169,7 @@ kmeansCuda(float  **feature,				/* in: [npoints][nfeatures] */
 									  block_clusters_d,
 									  block_deltas_d);
 
-	cudaThreadSynchronize();
+	cudaDeviceSynchronize();
 
 	/* copy back membership (device to host) */
 	cudaMemcpy(membership_new, membership_d, npoints*sizeof(int), cudaMemcpyDeviceToHost);	

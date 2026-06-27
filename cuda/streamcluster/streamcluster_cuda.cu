@@ -26,7 +26,7 @@ using namespace std;
 
 #define THREADS_PER_BLOCK 512
 #define MAXBLOCKS 65536
-#define CUDATIME
+// #define CUDATIME
 
 // host memory
 float *work_mem_h;
@@ -254,7 +254,7 @@ float pgain( long x, Points *points, float z, long int *numcenters, int kmax, bo
 															center_table_d,			// in:	center index table
 															switch_membership_d		// out:  changes in membership
 															);
-	cudaThreadSynchronize();
+	cudaDeviceSynchronize();
 	
 	// error check
 	error = cudaGetLastError();

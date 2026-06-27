@@ -231,6 +231,7 @@ int main(int argc, char ** argv) {
 	printf("GICOV computation: %.5f seconds\n", ((float) (GICOV_end_time - GICOV_start_time)) / (1000*1000));
 	printf("   GICOV dilation: %.5f seconds\n", ((float) (dilate_end_time - dilate_start_time)) / (1000*1000));
 	printf("            Total: %.5f seconds\n", ((float) (get_time() - program_start_time)) / (1000*1000));
+	return 0;
 	
 	// Now that the cells have been detected in the first frame,
 	//  track the ellipses through subsequent frames

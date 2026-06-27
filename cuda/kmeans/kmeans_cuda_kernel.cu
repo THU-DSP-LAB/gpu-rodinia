@@ -12,10 +12,6 @@
 #define SDATA( index)      CUT_BANK_CHECKER(sdata, index)
 
 // t_features has the layout dim0[points 0-m-1]dim1[ points 0-m-1]...
-texture<float, 1, cudaReadModeElementType> t_features;
-// t_features_flipped has the layout point0[dim 0-n-1]point1[dim 0-n-1]
-texture<float, 1, cudaReadModeElementType> t_features_flipped;
-texture<float, 1, cudaReadModeElementType> t_clusters;
 
 
 __constant__ float c_clusters[ASSUMED_NR_CLUSTERS*34];		/* constant memory for cluster centers */
@@ -86,7 +82,7 @@ kmeansPoint(float  *features,			/* in: [npoints*nfeatures] */
 			for (j=0; j < nfeatures; j++)
 			{					
 				int addr = point_id + j*npoints;					/* appropriate index of data point */
-				float diff = (tex1Dfetch(t_features,addr) -
+				float diff = (features[addr] -
 							  c_clusters[cluster_base_index + j]);	/* distance between a data point to cluster centers */
 				ans += diff*diff;									/* sum of squares */
 			}
@@ -167,7 +163,7 @@ kmeansPoint(float  *features,			/* in: [npoints*nfeatures] */
 	if(threadIdx.x < nfeatures * nclusters) {
 		// accumulate over all the elements of this threadblock 
 		for(int i = 0; i< (THREADS_PER_BLOCK); i++) {
-			float val = tex1Dfetch(t_features_flipped,new_base_index+i*nfeatures);
+			float val = features[new_base_index+i*nfeatures];
 			if(new_center_ids[i] == center_id) 
 				accumulator += val;
 		}

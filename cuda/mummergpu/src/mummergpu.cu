@@ -465,7 +465,7 @@ void boardMemory(size_t * free_mem, size_t * total_mem)
   *free_mem =  512*1024*1024;
   *total_mem = 768*1024*1024;
 #else
-  CU_SAFE_CALL_NO_SYNC(cuMemGetInfo(free_mem, total_mem));
+  CUDA_SAFE_CALL(cudaMemGetInfo(free_mem, total_mem));
 #endif
 }
 
@@ -1426,7 +1426,7 @@ void runPrintKernel(MatchContext* ctx,
 #endif
                                              );
                                              
-    cudaThreadSynchronize();
+    cudaDeviceSynchronize();
     
     
     
@@ -1444,7 +1444,7 @@ void runPrintKernel(MatchContext* ctx,
                               (void*)d_alignments,
                               alignmentSize,
                               cudaMemcpyDeviceToHost));   
-    cudaThreadSynchronize();
+    cudaDeviceSynchronize();
 	stopTimer(atimer);
 
 	float atime = getTimerValue(atimer);
@@ -1573,7 +1573,7 @@ void getExactAlignments(MatchContext * ctx, ReferencePage * page, bool on_cpu)
 
 		if (num_bind_tex_calls > 100)
 		{
-        	cudaThreadExit();
+        	cudaDeviceReset();
 			num_bind_tex_calls = 0;
 			loadReference(ctx);
 			loadQueries(ctx);
@@ -2021,7 +2021,7 @@ void matchQueryBlockToReferencePage(MatchContext* ctx,
 	{
 
 		matchOnGPU(ctx, reverse_complement);
-		cudaThreadSynchronize();
+		cudaDeviceSynchronize();
 
 	}
 	stopTimer(ktimer);
@@ -2110,7 +2110,7 @@ int matchQueriesToReferencePage(MatchContext* ctx, ReferencePage* page)
         destroyQueryBlock(ctx->queries);
 		if (num_bind_tex_calls > 100)
 		{
-        	cudaThreadExit();
+        	cudaDeviceReset();
 			num_bind_tex_calls = 0;
 			loadReference(ctx);
 		}

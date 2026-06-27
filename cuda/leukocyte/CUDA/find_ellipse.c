@@ -3,14 +3,14 @@
 #include <sys/time.h>
 
 // The number of sample points per ellipse
-#define NPOINTS 150
+#define NPOINTS 4
 // The expected radius (in pixels) of a cell
-#define RADIUS 10
+#define RADIUS 2
 // The range of acceptable radii
-#define MIN_RAD RADIUS - 2
-#define MAX_RAD RADIUS * 2
+#define MIN_RAD RADIUS
+#define MAX_RAD RADIUS
 // The number of different sample ellipses to try
-#define NCIRCLES 7
+#define NCIRCLES 1
 
 
 extern MAT * m_inverse(MAT * A, MAT * out);
@@ -46,7 +46,8 @@ MAT * get_frame(avi_t *cell_file, int frame_num, int cropped, int scaled) {
 	MAT * image_chopped;
 	if (cropped) {
 		// Crop and flip image so we deal only with the interior of the vein
-		image_chopped = chop_flip_image(image_buf, height, width, TOP, BOTTOM, 0, width - 1, scaled);
+		int right = width > 64 ? 63 : width - 1;
+		image_chopped = chop_flip_image(image_buf, height, width, TOP, BOTTOM, 0, right, scaled);
 	} else {
 		// Just flip the image
 		image_chopped = chop_flip_image(image_buf, height, width, 0, height - 1, 0, width - 1, scaled);
@@ -90,8 +91,8 @@ void choose_GPU() {
 //  constant matrices required by the GPU kernels
 void compute_constants() {
 	// Compute memory sizes
-	int strel_m = 12 * 2 + 1;
-	int strel_n = 12 * 2 + 1;
+	int strel_m = 1 * 2 + 1;
+	int strel_n = 1 * 2 + 1;
 	
 	int n, k;
 	// Compute the sine and cosine of the angle to each point in each sample circle
@@ -114,7 +115,7 @@ void compute_constants() {
 	}
 	
 	// Compute the structuring element used in dilation
-	float *host_strel = structuring_element(12);
+	float *host_strel = structuring_element(1);
 	
 	// Transfer the computed matrices to the GPU
 	transfer_constants(host_sin_angle, host_cos_angle, host_tX, host_tY, strel_m, strel_n, host_strel);
@@ -189,8 +190,8 @@ MAT *dilate(MAT *img_in) {
 	int max_gicov_n = img_in->n;
 
 	// Determine the dimensions of the structuring element
-	int strel_m = 12 * 2 + 1;
-	int strel_n = 12 * 2 + 1;
+	int strel_m = 1 * 2 + 1;
+	int strel_n = 1 * 2 + 1;
 
 	// Offload the dilation to the GPU
 	float *host_img_dilated = dilate_CUDA(max_gicov_m, max_gicov_n, strel_m, strel_n);

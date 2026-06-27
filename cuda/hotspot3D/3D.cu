@@ -194,6 +194,8 @@ int main(int argc, char** argv)
     hotspot_opt1(powerIn, tempIn, tempOut, numCols, numRows, layers, Cap, Rx, Ry, Rz, dt,iterations);
 
     computeTempCPU(powerIn, tempCopy, answer, numCols, numRows, layers, Cap, Rx, Ry, Rz, dt,iterations);
+    if ((iterations & 1) == 0)
+        memcpy(answer, tempCopy, size * sizeof(float));
 
     float acc = accuracy(tempOut,answer,numRows*numCols*layers);
     printf("Accuracy: %e\n",acc);

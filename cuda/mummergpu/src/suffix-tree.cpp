@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <sys/types.h>
+#include <unistd.h>
 #include <errno.h>
 #include <assert.h>
 #include <stdint.h> 
@@ -1208,11 +1209,11 @@ void buildNodeTexture(SuffixNode * node,
   writeAddress(arr, myaddress);
   TextureAddress newaddr = arrayToAddress(arr);
 
-  TextureAddress parent(id2addr(node->m_parent->id()));
+  TextureAddress parent(id2addr(node->m_parent ? node->m_parent->id() : 0));
   writeAddress(nd->parent, parent);
   assert(arrayToAddress(nd->parent).data == parent.data);
 
-  TextureAddress suffix(id2addr(node->m_suffix->id()));
+  TextureAddress suffix(id2addr(node->m_suffix ? node->m_suffix->id() : 0));
   writeAddress(nd->suffix, suffix);
   assert(arrayToAddress(nd->suffix).data == suffix.data);
 

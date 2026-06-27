@@ -252,7 +252,7 @@ void findLowest(std::vector<Record> &records,float *distances,int numRecords,int
   int i,j;
   float val;
   int minLoc;
-  Record *tempRec;
+  Record tempRec;
   float tempDist;
 
   for(i=0;i<topN;i++) {
@@ -262,9 +262,9 @@ void findLowest(std::vector<Record> &records,float *distances,int numRecords,int
       if (val < distances[minLoc]) minLoc = j;
     }
     // swap locations and distances
-    tempRec = &records[i];
+    tempRec = records[i];
     records[i] = records[minLoc];
-    records[minLoc] = *tempRec;
+    records[minLoc] = tempRec;
 
     tempDist = distances[i];
     distances[i] = distances[minLoc];

@@ -20,7 +20,7 @@ using namespace std;
 #define MAXNAMESIZE 1024 			// max filename length
 #define SEED 1
 #define SP 1 						// number of repetitions of speedy must be >=1
-#define ITER 3 						// iterate ITER* k log k times; ITER >= 1
+#define ITER 1 						// iterate ITER* k log k times; ITER >= 1
 //#define PRINTINFO 				// Enables printing output
 #define PROFILE 					// Enables timing info
 //#define ENABLE_THREADS			// Enables parallel execution

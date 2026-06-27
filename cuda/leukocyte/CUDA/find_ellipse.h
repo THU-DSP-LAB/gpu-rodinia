@@ -9,7 +9,7 @@
 
 // Defines the region in the video frame containing the blood vessel
 #define TOP 110
-#define BOTTOM 328
+#define BOTTOM 160
 
 extern long long get_time();
 

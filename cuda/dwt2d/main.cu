@@ -52,7 +52,7 @@ struct dwt {
 int getImg(char * srcFilename, unsigned char *srcImg, int inputSize)
 {
     // printf("Loading ipnput: %s\n", srcFilename);
-    char *path = "../../data/dwt2d/";
+    char *path = "";
     char *newSrc = NULL;
     
     if((newSrc = (char *)malloc(strlen(srcFilename)+strlen(path)+1)) != NULL)
@@ -345,7 +345,7 @@ int main(int argc, char **argv)
     d->dwtLvls  = dwtLvls;
 
     // file names
-    d->srcFilename = (char *)malloc(strlen(argv[0]));
+    d->srcFilename = (char *)malloc(strlen(argv[0]) + 1);
     strcpy(d->srcFilename, argv[0]);
     if (argc == 1) { // only one filename supplyed
         d->outFilename = (char *)malloc(strlen(d->srcFilename)+4);
