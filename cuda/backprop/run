@@ -1,1 +1,1 @@
-./backprop 2097152 --verify-reference ../../data/backprop/cuda_2097152.reference
+./backprop 2097152 --verify-reference ../../data/backprop/backprop_2097152.reference

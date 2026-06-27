@@ -1,5 +1,10 @@
 data/*
 !data/.gitkeep
+!data/backprop/
+!data/backprop/*.reference
+!data/bfs/
+!data/bfs/graph65536.reference
+!data/bfs/graph65536.txt
 
 *.o
 *.a

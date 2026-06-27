@@ -1,1 +1,1 @@
-./bfs.out ../../data/bfs/graph65536.txt --verify-cpu --verify-reference ../../data/bfs/cuda_graph65536.reference
+./bfs.out ../../data/bfs/graph65536.txt --verify-cpu --verify-reference ../../data/bfs/graph65536.reference
