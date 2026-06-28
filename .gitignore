@@ -8,6 +8,11 @@ data/*
 !data/mummergpu/
 data/mummergpu/*
 !data/mummergpu/*.reference
+!data/myocyte/
+data/myocyte/*
+!data/myocyte/params.txt
+!data/myocyte/y.txt
+!data/myocyte/*.reference
 
 *.o
 *.a
