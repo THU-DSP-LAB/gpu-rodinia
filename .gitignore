@@ -5,6 +5,9 @@ data/*
 !data/bfs/
 !data/bfs/graph65536.reference
 !data/bfs/graph65536.txt
+!data/mummergpu/
+data/mummergpu/*
+!data/mummergpu/*.reference
 
 *.o
 *.a
