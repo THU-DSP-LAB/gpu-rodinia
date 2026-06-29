@@ -125,6 +125,8 @@ private:
 };
 
 /* function prototypes */
+extern bool g_verify_cpu;
+extern long g_verified_kernel_calls;
 double gettime();
 int isIdentical(float*, float*, int);
 //static int floatcomp(const void*, const void*);
@@ -148,5 +150,6 @@ void allocDevMem(int, int, int);
 void allocHostMem(int, int, int);
 void freeDevMem();
 void freeHostMem();
+void verifyKernelComputeCostCPU(int, int, long, Points*, int, int, const float*, const int*, const float*, const bool*);
 
 #endif

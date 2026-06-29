@@ -19,6 +19,7 @@
 #include "stats_logger.h"
 #include "load_data.h"
 #include <sys/time.h>
+#include <vector>
 //#include "vlc_kernel_gm32.cu"
 //#include "vlc_kernel_sm32.cu"
 #include "vlc_kernel_sm64huff.cu"
@@ -34,23 +35,39 @@ long long get_time() {
 	gettimeofday(&tv, NULL);
 	return (tv.tv_sec * 1000000) + tv.tv_usec;
 }
-void runVLCTest(char *file_name, uint num_block_threads, uint num_blocks=1);
+int runVLCTest(char *file_name, uint num_block_threads, bool verify_cpu, uint num_blocks=1);
 
 extern "C" void cpu_vlc_encode(unsigned int* indata, unsigned int num_elements, unsigned int* outdata, unsigned int *outsize, unsigned int *codewords, unsigned int* codewordlens);
 
 int main(int argc, char* argv[]){
-    if(!InitCUDA()) { return 0;	}
+    if(!InitCUDA()) { return EXIT_FAILURE;	}
     unsigned int num_block_threads = 256;
-    if (argc > 1)
-        for (int i=1; i<argc; i++)
-            runVLCTest(argv[i], num_block_threads);
-    else {	runVLCTest(NULL, num_block_threads, 1024);	}
+    int status = EXIT_SUCCESS;
+    bool verify_cpu = false;
+    std::vector<char *> input_files;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--verify-cpu") == 0) {
+            verify_cpu = true;
+            continue;
+        }
+        input_files.push_back(argv[i]);
+    }
+    if (!input_files.empty()) {
+        for (size_t i = 0; i < input_files.size(); i++) {
+            if (runVLCTest(input_files[i], num_block_threads, verify_cpu) != 0) {
+                status = EXIT_FAILURE;
+            }
+        }
+    } else if (runVLCTest(NULL, num_block_threads, verify_cpu, 1024) != 0) {
+        status = EXIT_FAILURE;
+    }
     CUDA_SAFE_CALL(cudaDeviceReset());
-    return 0;
+    return status;
 }
 
-void runVLCTest(char *file_name, uint num_block_threads, uint num_blocks) {
+int runVLCTest(char *file_name, uint num_block_threads, bool verify_cpu, uint num_blocks) {
     printf("CUDA! Starting VLC Tests!\n");
+    int status = 0;
     unsigned int num_elements; //uint num_elements = num_blocks * num_block_threads; 
     unsigned int mem_size; //uint mem_size = num_elements * sizeof(int); 
     unsigned int symbol_type_size = sizeof(int);
@@ -156,20 +173,21 @@ void runVLCTest(char *file_name, uint num_block_threads, uint num_blocks) {
     printf("GPU Encoding time (SM64HUFF): %f (ms)\n", elapsedTime/NT);
     //////////////////* END KERNEL *///////////////////////////////////
 
-#ifdef TESTING
+    if (verify_cpu) {
     unsigned int num_scan_elements = grid_size.x;
     preallocBlockSums(num_scan_elements);
     cudaMemset(d_destDataPacked, 0, mem_size);
     printf("Num_blocks to be passed to scan is %d.\n", num_scan_elements);
     prescanArray(d_cindex2, d_cindex, num_scan_elements);
 
-    pack2<<< num_scan_elements/16, 16>>>((unsigned int*)d_destData, d_cindex, d_cindex2, (unsigned int*)d_destDataPacked, num_elements/num_scan_elements);
+    unsigned int pack_blocks = (num_scan_elements + 15) / 16;
+    pack2<<< pack_blocks, 16>>>((unsigned int*)d_destData, d_cindex, d_cindex2, (unsigned int*)d_destDataPacked, num_elements/num_scan_elements);
     CUT_CHECK_ERROR("Pack2 Kernel execution failed\n");
     deallocBlockSums();
 
     CUDA_SAFE_CALL(cudaMemcpy(destData, d_destDataPacked, mem_size, cudaMemcpyDeviceToHost));
-    compare_vectors((unsigned int*)crefData, (unsigned int*)destData, num_ints);
-#endif 
+    status = compare_vectors((unsigned int*)crefData, (unsigned int*)destData, num_ints);
+    }
 
     free(sourceData); free(destData);  	free(codewords);  	free(codewordlens); free(cw32);  free(cw32len); free(crefData); 
     CUDA_SAFE_CALL(cudaFree(d_sourceData)); 	CUDA_SAFE_CALL(cudaFree(d_destData)); CUDA_SAFE_CALL(cudaFree(d_destDataPacked));
@@ -177,5 +195,5 @@ void runVLCTest(char *file_name, uint num_block_threads, uint num_blocks) {
     CUDA_SAFE_CALL(cudaFree(d_cw32)); 		CUDA_SAFE_CALL(cudaFree(d_cw32len)); 	CUDA_SAFE_CALL(cudaFree(d_cw32idx)); 
     CUDA_SAFE_CALL(cudaFree(d_cindex)); CUDA_SAFE_CALL(cudaFree(d_cindex2));
     free(cindex2);
+    return status;
 }
-

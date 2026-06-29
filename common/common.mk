@@ -35,8 +35,9 @@
 
 .SUFFIXES : .cu .cu_dbg_o .c_dbg_o .cpp_dbg_o .cu_rel_o .c_rel_o .cpp_rel_o .cubin
 
-# Add new SM Versions here as devices with new Compute Capability are released
-SM_VERSIONS := sm_10 sm_11 sm_12 sm_13
+# Add new SM versions here as devices with new Compute Capability are released.
+CUDA_ARCH_LIST ?= 75 80 86 87 88 89 90 100 103 110 120 121
+SM_VERSIONS := $(addprefix sm_,$(CUDA_ARCH_LIST))
 
 CUDA_INSTALL_PATH ?= /usr/local/cuda
 
@@ -71,6 +72,7 @@ INCLUDES  += -I. -I$(CUDA_INSTALL_PATH)/include -I$(COMMONDIR)/inc
 
 # architecture flag for cubin build
 CUBIN_ARCH_FLAG := -m32
+CUDA_CUDART_FLAGS ?= --cudart shared
 
 # Warning flags
 CXXWARN_FLAGS := \
@@ -118,7 +120,7 @@ else
 	CFLAGS      += -fno-strict-aliasing
 endif
 
-# append optional arch/SM version flags (such as -arch sm_11)
+# append optional arch/SM version flags (such as -arch sm_80)
 #NVCCFLAGS += $(SMVERSIONFLAGS)
 
 # architecture flag for cubin build
@@ -181,6 +183,7 @@ ifeq ($(USEDRVAPI),1)
    LIB += -lcuda ${OPENGLLIB} $(PARAMGLLIB) $(RENDERCHECKGLLIB) $(CUDPPLIB) ${LIB} 
 else
    LIB += -lcudart ${OPENGLLIB} $(PARAMGLLIB) $(RENDERCHECKGLLIB) $(CUDPPLIB) ${LIB}
+   NVCCFLAGS += $(CUDA_CUDART_FLAGS)
 endif
 
 ifeq ($(USECUFFT),1)
@@ -292,7 +295,7 @@ $(CUBINDIR)/%.cubin : $(SRCDIR)%.cu cubindirectory
 
 #
 # The following definition is a template that gets instantiated for each SM
-# version (sm_10, sm_13, etc.) stored in SMVERSIONS.  It does 2 things:
+# version (sm_80, sm_89, etc.) stored in SMVERSIONS.  It does 2 things:
 # 1. It adds to OBJS a .cu_sm_XX_o for each .cu file it finds in CUFILES_sm_XX.
 # 2. It generates a rule for building .cu_sm_XX_o files from the corresponding 
 #    .cu file.
@@ -301,8 +304,8 @@ $(CUBINDIR)/%.cubin : $(SRCDIR)%.cu cubindirectory
 # files to different Compute Capability targets (aka SM arch version).  To do
 # so, in the Makefile, list files for each SM arch separately, like so:
 #
-# CUFILES_sm_10 := mycudakernel_sm10.cu app.cu
-# CUFILES_sm_12 := anothercudakernel_sm12.cu
+# CUFILES_sm_80 := mycudakernel_sm80.cu app.cu
+# CUFILES_sm_89 := anothercudakernel_sm89.cu
 #
 define SMVERSION_template
 OBJS += $(patsubst %.cu,$(OBJDIR)/%.cu_$(1)_o,$(notdir $(CUFILES_$(1))))

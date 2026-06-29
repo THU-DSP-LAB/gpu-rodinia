@@ -1,3 +1,5 @@
+include ../../common/make.config
+
 # Example
 # target: dependencies
 	# command 1
@@ -9,10 +11,10 @@
 
 # link objects(binaries) together
 myocyte.out:		main.o
-	nvcc	main.o \
-				-I/usr/local/cuda/include \
-				-L/usr/local/cuda/lib \
-				-lm -lcuda -lcudart \
+	nvcc	$(CUDA_CUDART_FLAGS) main.o \
+				-I$(CUDA_DIR)/include \
+				-L$(CUDA_LIB_DIR) \
+				-lm -lcudart -lcuda \
                                 -o myocyte.out
 
 # compile main function file into object (binary)
@@ -27,6 +29,7 @@ main.o:	define.c \
 				kernel_cam.cu \
 				kernel_fin.cu \
 				work_2.cu \
+				myocyte_reference.c \
 				solver_2.cu \
 				embedded_fehlberg_7_8_2.cu \
 				kernel_2.cu \
@@ -36,7 +39,7 @@ main.o:	define.c \
 				file.c \
 				timer.c
 	nvcc	main.cu \
-				-c -O3 -g
+				-c -O3 -g $(CUDA_GENCODE_FLAGS)
 
 # delete all object files
 clean:

@@ -5,6 +5,7 @@
 #include <math.h>
 
 #include "common.h"
+#include "../../../common/rodinia_verify.h"
 
 void stopwatch_start(stopwatch *sw){
     if (sw == NULL)
@@ -139,7 +140,12 @@ matrix_multiply(float *inputa, float *inputb, float *output, int size){
 func_ret_t
 lud_verify(float *m, float *lu, int matrix_dim){
   int i,j,k;
+  int mismatch_count = 0;
   float *tmp = (float*)malloc(matrix_dim*matrix_dim*sizeof(float));
+  if (tmp == NULL) {
+      fprintf(stderr, "Cannot allocate LUD verification matrix\n");
+      return RET_FAILURE;
+  }
 
   for (i=0; i < matrix_dim; i ++)
     for (j=0; j< matrix_dim; j++) {
@@ -179,19 +185,33 @@ lud_verify(float *m, float *lu, int matrix_dim){
 
   for (i=0; i<matrix_dim; i++){
       for (j=0; j<matrix_dim; j++){
-          if ( fabs(m[i*matrix_dim+j]-tmp[i*matrix_dim+j]) > 0.0001)
+          if ( fabs(m[i*matrix_dim+j]-tmp[i*matrix_dim+j]) > 0.0001) {
             printf("dismatch at (%d, %d): (o)%f (n)%f\n", i, j, m[i*matrix_dim+j], tmp[i*matrix_dim+j]);
+            mismatch_count++;
+          }
       }
   }
   free(tmp);
+  if (mismatch_count != 0) {
+      fprintf(stderr, "LUD CPU reference mismatch count: %d\n", mismatch_count);
+      rodinia_print_fail("LUD CPU reference verification");
+      return RET_FAILURE;
+  }
+  rodinia_print_pass("LUD CPU reference verification");
+  return RET_SUCCESS;
 }
 
-void
+func_ret_t
 matrix_duplicate(float *src, float **dst, int matrix_dim) {
     int s = matrix_dim*matrix_dim*sizeof(float);
    float *p = (float *) malloc (s);
+   if (p == NULL) {
+       *dst = NULL;
+       return RET_FAILURE;
+   }
    memcpy(p, src, s);
    *dst = p;
+   return RET_SUCCESS;
 }
 
 void

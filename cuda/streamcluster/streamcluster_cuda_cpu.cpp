@@ -14,6 +14,7 @@
 ***********************************************/
 
 #include "streamcluster_header.cu"
+#include "../../common/rodinia_verify.h"
 
 using namespace std;
 
@@ -52,6 +53,97 @@ double time_shuffle;
 double time_gain_dist;
 double time_gain_init;
 #endif 
+
+static const float STREAMCLUSTER_VERIFY_TOLERANCE = 1.0e-5f;
+bool g_verify_cpu = false;
+long g_verified_kernel_calls = 0;
+
+static bool nearlyEqual(float actual, float expected)
+{
+  float delta = fabsf(actual - expected);
+  return delta <= STREAMCLUSTER_VERIFY_TOLERANCE;
+}
+
+static float cpuDeviceDist(int p1, long p2, int num, int dim, const float *coord)
+{
+  float result = 0.0f;
+  for (int i = 0; i < dim; i++) {
+    float difference = coord[(i * num) + p1] - coord[(i * num) + p2];
+    result = fmaf(difference, difference, result);
+  }
+  return result;
+}
+
+void verifyKernelComputeCostCPU(
+    int num,
+    int dim,
+    long x,
+    Points *points,
+    int kIndex,
+    int stride,
+    const float *coord,
+    const int *centerTable,
+    const float *actualWorkMem,
+    const bool *actualSwitchMembership)
+{
+  for (int tid = 0; tid < num; tid++) {
+    float xCost = cpuDeviceDist(tid, x, num, dim, coord) * points->p[tid].weight;
+    bool expectedSwitch = xCost < points->p[tid].cost;
+
+    if (actualSwitchMembership[tid] != expectedSwitch) {
+      fprintf(stderr,
+              "Streamcluster CPU reference mismatch at point %d switch_membership: actual=%d expected=%d x_cost=%0.9f current_cost=%0.9f assign=%ld x=%ld coord=(%0.9f,%0.9f) x_coord=(%0.9f,%0.9f) actual_work_k=%0.9f actual_work_assign=%0.9f\n",
+              tid,
+              actualSwitchMembership[tid],
+              expectedSwitch,
+              xCost,
+              points->p[tid].cost,
+              points->p[tid].assign,
+              x,
+              coord[tid],
+              dim > 1 ? coord[num + tid] : 0.0f,
+              coord[x],
+              dim > 1 ? coord[num + x] : 0.0f,
+              actualWorkMem[tid * stride + kIndex],
+              actualWorkMem[tid * stride + centerTable[points->p[tid].assign]]);
+      rodinia_print_fail("Streamcluster CPU reference verification");
+      exit(EXIT_FAILURE);
+    }
+
+    int expectedColumn = expectedSwitch ? kIndex : centerTable[points->p[tid].assign];
+    float expectedValue = expectedSwitch ? xCost - points->p[tid].cost
+                                         : points->p[tid].cost - xCost;
+
+    for (int column = 0; column < stride; column++) {
+      float expected = (column == expectedColumn) ? expectedValue : 0.0f;
+      float actual = actualWorkMem[tid * stride + column];
+      if (!nearlyEqual(actual, expected)) {
+        fprintf(stderr,
+                "Streamcluster CPU reference mismatch at work_mem[%d][%d]: actual=%0.9f expected=%0.9f\n",
+                tid,
+                column,
+                actual,
+                expected);
+        rodinia_print_fail("Streamcluster CPU reference verification");
+        exit(EXIT_FAILURE);
+      }
+    }
+  }
+
+  for (int column = 0; column < stride; column++) {
+    float actual = actualWorkMem[num * stride + column];
+    if (!nearlyEqual(actual, 0.0f)) {
+      fprintf(stderr,
+              "Streamcluster CPU reference mismatch at work_mem scratch row column %d: actual=%0.9f expected=0\n",
+              column,
+              actual);
+      rodinia_print_fail("Streamcluster CPU reference verification");
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  g_verified_kernel_calls++;
+}
 
 void inttofile(int data, char *filename){
 	FILE *fp = fopen(filename, "w");
@@ -869,7 +961,7 @@ int main(int argc, char **argv)
 #endif
 
   if (argc<10) {
-    fprintf(stderr,"usage: %s k1 k2 d n chunksize clustersize infile outfile nproc\n",
+    fprintf(stderr,"usage: %s k1 k2 d n chunksize clustersize infile outfile nproc [--verify-cpu]\n",
 	    argv[0]);
     fprintf(stderr,"  k1:          Min. number of centers allowed\n");
     fprintf(stderr,"  k2:          Max. number of centers allowed\n");
@@ -884,6 +976,10 @@ int main(int argc, char **argv)
     fprintf(stderr, "if n > 0, points will be randomly generated instead of reading from infile.\n");
     exit(1);
   }
+  if (argc > 11) {
+    fprintf(stderr,"too many arguments\n");
+    exit(1);
+  }
   kmin = atoi(argv[1]);
   kmax = atoi(argv[2]);
   dim = atoi(argv[3]);
@@ -893,6 +989,13 @@ int main(int argc, char **argv)
   strcpy(infilename, argv[7]);
   strcpy(outfilename, argv[8]);
   nproc = atoi(argv[9]);
+  if (argc == 11) {
+    if (strcmp(argv[10], "--verify-cpu") != 0 && strcmp(argv[10], "-V") != 0) {
+      fprintf(stderr,"unknown option: %s\n", argv[10]);
+      exit(1);
+    }
+    g_verify_cpu = true;
+  }
 
   srand48(SEED);
   PStream* stream;
@@ -920,8 +1023,18 @@ int main(int argc, char **argv)
 	
   streamCluster(stream, kmin, kmax, dim, chunksize, clustersize, outfilename );
 
-	freeDevMem();
-	freeHostMem();
+		freeDevMem();
+		freeHostMem();
+  if (g_verify_cpu) {
+    if (g_verified_kernel_calls == 0) {
+      fprintf(stderr, "Streamcluster CPU reference verification did not observe any kernel launches\n");
+      rodinia_print_fail("Streamcluster CPU reference verification");
+      return 1;
+    }
+    printf("Streamcluster CPU reference verification covered %ld kernel launches\n",
+           g_verified_kernel_calls);
+    rodinia_print_pass("Streamcluster CPU reference verification");
+  }
 
 #ifdef ENABLE_PARSEC_HOOKS
   __parsec_roi_end();

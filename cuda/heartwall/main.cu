@@ -9,12 +9,15 @@
 //======================================================================================================================================================
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <math.h>
 #include <string.h>
+#include <stdint.h>
 
 #include <avilib.h>
 #include <avimod.h>
 #include <cuda.h>
+#include "../../common/rodinia_verify.h"
 
 //======================================================================================================================================================
 //	STRUCTURES, GLOBAL STRUCTURE VARIABLES
@@ -36,6 +39,228 @@ __constant__ params_unique d_unique[ALL_POINTS];
 //======================================================================================================================================================
 
 #include "kernel.cu"
+
+#define HEARTWALL_REFERENCE_MAGIC "GPIDL_RODINIA_HEARTWALL_REFERENCE"
+#define HEARTWALL_REFERENCE_VERSION 1
+
+typedef struct {
+	uint64_t hash;
+	uint64_t bytes;
+	uint64_t lines;
+} FileDigest;
+
+typedef struct {
+	char video_name[256];
+	uint64_t video_hash;
+	uint64_t video_bytes;
+	int total_frames;
+	int frames_processed;
+	int frame_rows;
+	int frame_cols;
+	int endo_points;
+	int epi_points;
+	uint64_t output_hash;
+	uint64_t output_values;
+} HeartwallReference;
+
+static uint64_t fnv1a_update(uint64_t hash, const void *data, size_t size)
+{
+	const unsigned char *bytes = (const unsigned char *)data;
+	for (size_t i = 0; i < size; i++) {
+		hash ^= bytes[i];
+		hash *= 1099511628211ULL;
+	}
+	return hash;
+}
+
+static const char *basename_of(const char *path)
+{
+	const char *slash = strrchr(path, '/');
+	return slash == NULL ? path : slash + 1;
+}
+
+static int compute_file_digest(const char *path, FileDigest *digest)
+{
+	FILE *file = fopen(path, "rb");
+	if (file == NULL) {
+		fprintf(stderr, "Cannot open file for digest: %s\n", path);
+		return -1;
+	}
+	digest->hash = 1469598103934665603ULL;
+	digest->bytes = 0;
+	digest->lines = 0;
+	unsigned char buffer[65536];
+	while (1) {
+		size_t count = fread(buffer, 1, sizeof(buffer), file);
+		digest->hash = fnv1a_update(digest->hash, buffer, count);
+		for (size_t i = 0; i < count; i++) {
+			if (buffer[i] == '\n') {
+				digest->lines++;
+			}
+		}
+		digest->bytes += count;
+		if (count != sizeof(buffer)) {
+			if (ferror(file)) {
+				fprintf(stderr, "Failed reading file for digest: %s\n", path);
+				fclose(file);
+				return -1;
+			}
+			break;
+		}
+	}
+	fclose(file);
+	return 0;
+}
+
+static uint64_t hash_int_array(uint64_t hash, const int *values, int count)
+{
+	return fnv1a_update(hash, values, (size_t)count * sizeof(int));
+}
+
+static uint64_t hash_point_frames(
+	uint64_t hash,
+	const int *values,
+	int points,
+	int total_frames,
+	int frames_processed)
+{
+	for (int point = 0; point < points; point++) {
+		hash = hash_int_array(hash, values + point * total_frames, frames_processed);
+	}
+	return hash;
+}
+
+static void populate_reference(
+	HeartwallReference *reference,
+	const char *video_file_name,
+	const FileDigest *video_digest,
+	int frames_processed)
+{
+	memset(reference, 0, sizeof(*reference));
+	snprintf(reference->video_name, sizeof(reference->video_name), "%s", basename_of(video_file_name));
+	reference->video_hash = video_digest->hash;
+	reference->video_bytes = video_digest->bytes;
+	reference->total_frames = common.no_frames;
+	reference->frames_processed = frames_processed;
+	reference->frame_rows = common.frame_rows;
+	reference->frame_cols = common.frame_cols;
+	reference->endo_points = common.endoPoints;
+	reference->epi_points = common.epiPoints;
+	uint64_t hash = 1469598103934665603ULL;
+	hash = hash_point_frames(hash, common.tEndoRowLoc, common.endoPoints, common.no_frames, frames_processed);
+	hash = hash_point_frames(hash, common.tEndoColLoc, common.endoPoints, common.no_frames, frames_processed);
+	hash = hash_point_frames(hash, common.tEpiRowLoc, common.epiPoints, common.no_frames, frames_processed);
+	hash = hash_point_frames(hash, common.tEpiColLoc, common.epiPoints, common.no_frames, frames_processed);
+	reference->output_hash = hash;
+	reference->output_values =
+		(uint64_t)(common.endoPoints * 2 + common.epiPoints * 2) * (uint64_t)frames_processed;
+}
+
+static int save_reference(const char *path, const HeartwallReference *reference)
+{
+	FILE *file = fopen(path, "w");
+	if (file == NULL) {
+		fprintf(stderr, "Cannot open heartwall reference for write: %s\n", path);
+		return -1;
+	}
+	fprintf(file, "%s %d\n", HEARTWALL_REFERENCE_MAGIC, HEARTWALL_REFERENCE_VERSION);
+	fprintf(file, "video_name %s\n", reference->video_name);
+	fprintf(file, "video_hash %016llx\n", (unsigned long long)reference->video_hash);
+	fprintf(file, "video_bytes %llu\n", (unsigned long long)reference->video_bytes);
+	fprintf(file, "total_frames %d\n", reference->total_frames);
+	fprintf(file, "frames_processed %d\n", reference->frames_processed);
+	fprintf(file, "frame_rows %d\n", reference->frame_rows);
+	fprintf(file, "frame_cols %d\n", reference->frame_cols);
+	fprintf(file, "endo_points %d\n", reference->endo_points);
+	fprintf(file, "epi_points %d\n", reference->epi_points);
+	fprintf(file, "output_hash %016llx\n", (unsigned long long)reference->output_hash);
+	fprintf(file, "output_values %llu\n", (unsigned long long)reference->output_values);
+	if (fclose(file) != 0) {
+		fprintf(stderr, "Failed closing heartwall reference: %s\n", path);
+		return -1;
+	}
+	printf("Saved heartwall reference to '%s'\n", path);
+	return 0;
+}
+
+static int scan_reference_field(FILE *file, const char *label, const char *format, void *value)
+{
+	char actual_label[64];
+	if (fscanf(file, "%63s", actual_label) != 1 || strcmp(actual_label, label) != 0 ||
+		fscanf(file, format, value) != 1) {
+		fprintf(stderr, "Invalid heartwall reference field: %s\n", label);
+		return -1;
+	}
+	return 0;
+}
+
+static int read_reference(const char *path, HeartwallReference *reference)
+{
+	FILE *file = fopen(path, "r");
+	if (file == NULL) {
+		fprintf(stderr, "Cannot open heartwall reference for read: %s\n", path);
+		return -1;
+	}
+	char magic[128];
+	int version = 0;
+	if (fscanf(file, "%127s %d", magic, &version) != 2 ||
+		strcmp(magic, HEARTWALL_REFERENCE_MAGIC) != 0 || version != HEARTWALL_REFERENCE_VERSION) {
+		fprintf(stderr, "Invalid heartwall reference header: %s\n", path);
+		fclose(file);
+		return -1;
+	}
+	unsigned long long ull_value = 0;
+	int failed = 0;
+	failed |= scan_reference_field(file, "video_name", "%255s", reference->video_name);
+	failed |= scan_reference_field(file, "video_hash", "%llx", &ull_value);
+	reference->video_hash = ull_value;
+	failed |= scan_reference_field(file, "video_bytes", "%llu", &ull_value);
+	reference->video_bytes = ull_value;
+	failed |= scan_reference_field(file, "total_frames", "%d", &reference->total_frames);
+	failed |= scan_reference_field(file, "frames_processed", "%d", &reference->frames_processed);
+	failed |= scan_reference_field(file, "frame_rows", "%d", &reference->frame_rows);
+	failed |= scan_reference_field(file, "frame_cols", "%d", &reference->frame_cols);
+	failed |= scan_reference_field(file, "endo_points", "%d", &reference->endo_points);
+	failed |= scan_reference_field(file, "epi_points", "%d", &reference->epi_points);
+	failed |= scan_reference_field(file, "output_hash", "%llx", &ull_value);
+	reference->output_hash = ull_value;
+	failed |= scan_reference_field(file, "output_values", "%llu", &ull_value);
+	reference->output_values = ull_value;
+	fclose(file);
+	return failed == 0 ? 0 : -1;
+}
+
+static int compare_reference(const HeartwallReference *actual, const HeartwallReference *expected)
+{
+	int failed = 0;
+	failed |= strcmp(actual->video_name, expected->video_name) != 0;
+	failed |= actual->video_hash != expected->video_hash;
+	failed |= actual->video_bytes != expected->video_bytes;
+	failed |= actual->total_frames != expected->total_frames;
+	failed |= actual->frames_processed != expected->frames_processed;
+	failed |= actual->frame_rows != expected->frame_rows;
+	failed |= actual->frame_cols != expected->frame_cols;
+	failed |= actual->endo_points != expected->endo_points;
+	failed |= actual->epi_points != expected->epi_points;
+	failed |= actual->output_hash != expected->output_hash;
+	failed |= actual->output_values != expected->output_values;
+	if (failed) {
+		fprintf(stderr, "heartwall reference mismatch\n");
+		return -1;
+	}
+	return 0;
+}
+
+static int verify_reference(const char *path, const HeartwallReference *actual)
+{
+	HeartwallReference expected;
+	if (read_reference(path, &expected) != 0 || compare_reference(actual, &expected) != 0) {
+		rodinia_print_fail("Heartwall reference verification");
+		return -1;
+	}
+	rodinia_print_pass("Heartwall reference verification");
+	return 0;
+}
 
 
 
@@ -136,18 +361,34 @@ int main(int argc, char *argv []){
 	char* video_file_name;
 	avi_t* frames;
 	fp* frame;
+	const char *save_reference_path = NULL;
+	const char *verify_reference_path = NULL;
+	FileDigest video_digest;
 
 	//======================================================================================================================================================
 	// 	FRAME
 	//======================================================================================================================================================
 
-	if(argc!=3){
-		printf("ERROR: usage: heartwall <inputfile> <num of frames>\n");
+	if(argc != 3 && argc != 5){
+		printf("ERROR: usage: heartwall <inputfile> <num of frames> [--save-reference <path>|--verify-reference <path>]\n");
 		exit(1);
+	}
+	if (argc == 5) {
+		if (strcmp(argv[3], "--save-reference") == 0) {
+			save_reference_path = argv[4];
+		} else if (strcmp(argv[3], "--verify-reference") == 0) {
+			verify_reference_path = argv[4];
+		} else {
+			fprintf(stderr, "Unknown heartwall reference option: %s\n", argv[3]);
+			return EXIT_FAILURE;
+		}
 	}
 	
 	// open movie file
  	video_file_name = argv[1];
+	if (compute_file_digest(video_file_name, &video_digest) != 0) {
+		return EXIT_FAILURE;
+	}
 	frames = (avi_t*)AVI_open_input_file(video_file_name, 1);														// added casting
 	if (frames == NULL)  {
 		   AVI_print_error((char *) "Error with AVI_open_input_file");
@@ -171,7 +412,7 @@ int main(int argc, char *argv []){
 	frames_processed = atoi(argv[2]);
 		if(frames_processed<0 || frames_processed>common.no_frames){
 			printf("ERROR: %d is an incorrect number of frames specified, select in the range of 0-%d\n", frames_processed, common.no_frames);
-			return 0;
+			return EXIT_FAILURE;
 	}
 	
 
@@ -687,6 +928,19 @@ int main(int argc, char *argv []){
 	cudaMemcpy(common.tEpiRowLoc, common.d_tEpiRowLoc, common.epi_mem * common.no_frames, cudaMemcpyDeviceToHost);
 	cudaMemcpy(common.tEpiColLoc, common.d_tEpiColLoc, common.epi_mem * common.no_frames, cudaMemcpyDeviceToHost);
 
+	int status = EXIT_SUCCESS;
+	if (save_reference_path != NULL || verify_reference_path != NULL) {
+		HeartwallReference reference;
+		populate_reference(&reference, video_file_name, &video_digest, frames_processed);
+		if (save_reference_path != NULL && save_reference(save_reference_path, &reference) != 0) {
+			status = EXIT_FAILURE;
+		}
+		if (status == EXIT_SUCCESS && verify_reference_path != NULL &&
+			verify_reference(verify_reference_path, &reference) != 0) {
+			status = EXIT_FAILURE;
+		}
+	}
+
 
 
 #ifdef OUTPUT
@@ -770,6 +1024,7 @@ int main(int argc, char *argv []){
 		cudaFree(unique[i].d_mask_conv);
 	}
 
+	return status;
 }
 
 //===============================================================================================================================================================================================================

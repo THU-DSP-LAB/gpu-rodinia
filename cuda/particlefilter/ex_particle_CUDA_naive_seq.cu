@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <float.h>
 #include <sys/time.h>
+#include "../../common/rodinia_verify.h"
 #define PI 3.1415926535897932
 #define BLOCK_X 16
 #define BLOCK_Y 16
@@ -30,6 +31,11 @@ int A = 1103515245;
 int C = 12345;
 
 const int threads_per_block = 128;
+
+enum {
+	PARTICLEFILTER_REFERENCE_SUCCESS = 0,
+	PARTICLEFILTER_REFERENCE_FAILURE = 1
+};
 
 /*****************************
 *GET_TIME
@@ -397,6 +403,39 @@ int findIndex(double * CDF, int lengthCDF, double value){
 	}
 	return index;
 }
+
+int verify_resampling_results(double * arrayX, double * arrayY, double * CDF, double * u, double * xj, double * yj, int Nparticles, int frame){
+	int mismatches = 0;
+	int x;
+	for(x = 0; x < Nparticles; x++){
+		int expected_index = findIndex(CDF, Nparticles, u[x]);
+		double expected_x = arrayX[expected_index];
+		double expected_y = arrayY[expected_index];
+		if(xj[x] == expected_x && yj[x] == expected_y){
+			continue;
+		}
+
+		fprintf(
+			stderr,
+			"Particlefilter CPU reference mismatch at frame %d particle %d selected_index=%d u=%0.17g: actual=(%0.17g,%0.17g) expected=(%0.17g,%0.17g)\n",
+			frame,
+			x,
+			expected_index,
+			u[x],
+			xj[x],
+			yj[x],
+			expected_x,
+			expected_y);
+		mismatches++;
+	}
+
+	if(mismatches != 0){
+		fprintf(stderr, "Particlefilter CPU reference verification failed at frame %d with %d mismatch(es)\n", frame, mismatches);
+		return PARTICLEFILTER_REFERENCE_FAILURE;
+	}
+
+	return PARTICLEFILTER_REFERENCE_SUCCESS;
+}
 /**
 * The implementation of the particle filter using OpenMP for many frames
 * @see http://openmp.org/wp/
@@ -408,7 +447,7 @@ int findIndex(double * CDF, int lengthCDF, double value){
 * @param seed The seed array used for random number generation
 * @param Nparticles The number of particles to be used
 */
-void particleFilter(int * I, int IszX, int IszY, int Nfr, int * seed, int Nparticles){
+int particleFilter(int * I, int IszX, int IszY, int Nfr, int * seed, int Nparticles, int verify_cpu){
 	int max_size = IszX*IszY*Nfr;
 	long long start = get_time();
 	//original particle centroid
@@ -472,6 +511,7 @@ void particleFilter(int * I, int IszX, int IszY, int Nfr, int * seed, int Nparti
 		arrayY[x] = ye;
 	}
 	int k;
+	int reference_status = PARTICLEFILTER_REFERENCE_SUCCESS;
 	//double * Ik = (double *)malloc(sizeof(double)*IszX*IszY);
 	int indX, indY;
 	for(k = 1; k < Nfr; k++){
@@ -576,6 +616,12 @@ void particleFilter(int * I, int IszX, int IszY, int Nfr, int * seed, int Nparti
 		//CUDA memory copying back from GPU to CPU memory
 		cudaMemcpy(yj, yj_GPU, sizeof(double)*Nparticles, cudaMemcpyDeviceToHost);
 		cudaMemcpy(xj, xj_GPU, sizeof(double)*Nparticles, cudaMemcpyDeviceToHost);
+		if(verify_cpu &&
+			verify_resampling_results(arrayX, arrayY, CDF, u, xj, yj, Nparticles, k) != PARTICLEFILTER_REFERENCE_SUCCESS){
+			rodinia_print_fail("Particlefilter naive CPU reference verification");
+			reference_status = PARTICLEFILTER_REFERENCE_FAILURE;
+			break;
+		}
 		long long end_copy_back = get_time();
 		printf("SENDING TO GPU TOOK: %lf\n", elapsed_time(start_copy, end_copy));
 		printf("CUDA EXEC TOOK: %lf\n", elapsed_time(end_copy, start_copy_back));
@@ -591,6 +637,9 @@ void particleFilter(int * I, int IszX, int IszY, int Nfr, int * seed, int Nparti
 		}
 		long long reset = get_time();
 		printf("TIME TO RESET WEIGHTS TOOK: %f\n", elapsed_time(xyj_time, reset));
+	}
+	if(verify_cpu && reference_status == PARTICLEFILTER_REFERENCE_SUCCESS){
+		rodinia_print_pass("Particlefilter naive CPU reference verification");
 	}
 	
 	//CUDA freeing of memory
@@ -613,66 +662,75 @@ void particleFilter(int * I, int IszX, int IszY, int Nfr, int * seed, int Nparti
 	free(CDF);
 	free(u);
 	free(ind);
+	return reference_status;
 }
 int main(int argc, char * argv[]){
 	
-	char* usage = "naive.out -x <dimX> -y <dimY> -z <Nfr> -np <Nparticles>";
+	char* usage = "naive.out -x <dimX> -y <dimY> -z <Nfr> -np <Nparticles> [--verify-cpu]";
 	//check number of arguments
-	if(argc != 9)
+	if(argc != 9 && argc != 10)
 	{
 		printf("%s\n", usage);
-		return 0;
+		return EXIT_FAILURE;
+	}
+	int verify_cpu = 0;
+	if(argc == 10){
+		if(strcmp(argv[9], "--verify-cpu") != 0){
+			printf("%s\n", usage);
+			return EXIT_FAILURE;
+		}
+		verify_cpu = 1;
 	}
 	//check args deliminators
 	if( strcmp( argv[1], "-x" ) ||  strcmp( argv[3], "-y" ) || strcmp( argv[5], "-z" ) || strcmp( argv[7], "-np" ) ) {
 		printf( "%s\n",usage );
-		return 0;
+		return EXIT_FAILURE;
 	}
 	
 	int IszX, IszY, Nfr, Nparticles;
 	
 	//converting a string to a integer
-	if( sscanf( argv[2], "%d", &IszX ) == EOF ) {
+	if( sscanf( argv[2], "%d", &IszX ) != 1 ) {
 	   printf("ERROR: dimX input is incorrect");
-	   return 0;
+	   return EXIT_FAILURE;
 	}
 	
 	if( IszX <= 0 ) {
 		printf("dimX must be > 0\n");
-		return 0;
+		return EXIT_FAILURE;
 	}
 	
 	//converting a string to a integer
-	if( sscanf( argv[4], "%d", &IszY ) == EOF ) {
+	if( sscanf( argv[4], "%d", &IszY ) != 1 ) {
 	   printf("ERROR: dimY input is incorrect");
-	   return 0;
+	   return EXIT_FAILURE;
 	}
 	
 	if( IszY <= 0 ) {
 		printf("dimY must be > 0\n");
-		return 0;
+		return EXIT_FAILURE;
 	}
 	
 	//converting a string to a integer
-	if( sscanf( argv[6], "%d", &Nfr ) == EOF ) {
+	if( sscanf( argv[6], "%d", &Nfr ) != 1 ) {
 	   printf("ERROR: Number of frames input is incorrect");
-	   return 0;
+	   return EXIT_FAILURE;
 	}
 	
 	if( Nfr <= 0 ) {
 		printf("number of frames must be > 0\n");
-		return 0;
+		return EXIT_FAILURE;
 	}
 	
 	//converting a string to a integer
-	if( sscanf( argv[8], "%d", &Nparticles ) == EOF ) {
+	if( sscanf( argv[8], "%d", &Nparticles ) != 1 ) {
 	   printf("ERROR: Number of particles input is incorrect");
-	   return 0;
+	   return EXIT_FAILURE;
 	}
 	
 	if( Nparticles <= 0 ) {
 		printf("Number of particles must be > 0\n");
-		return 0;
+		return EXIT_FAILURE;
 	}
 	//establish seed
 	int * seed = (int *)malloc(sizeof(int)*Nparticles);
@@ -687,12 +745,12 @@ int main(int argc, char * argv[]){
 	long long endVideoSequence = get_time();
 	printf("VIDEO SEQUENCE TOOK %f\n", elapsed_time(start, endVideoSequence));
 	//call particle filter
-	particleFilter(I, IszX, IszY, Nfr, seed, Nparticles);
+	int reference_status = particleFilter(I, IszX, IszY, Nfr, seed, Nparticles, verify_cpu);
 	long long endParticleFilter = get_time();
 	printf("PARTICLE FILTER TOOK %f\n", elapsed_time(endVideoSequence, endParticleFilter));
 	printf("ENTIRE PROGRAM TOOK %f\n", elapsed_time(start, endParticleFilter));
 	
 	free(seed);
 	free(I);
-	return 0;
+	return reference_status == PARTICLEFILTER_REFERENCE_SUCCESS ? EXIT_SUCCESS : EXIT_FAILURE;
 }

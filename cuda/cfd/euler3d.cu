@@ -4,8 +4,14 @@
 //#include <cutil.h>
 #include <helper_cuda.h>
 #include <helper_timer.h>
+#include <algorithm>
+#include <cfloat>
+#include <cmath>
+#include <cstring>
 #include <iostream>
 #include <fstream>
+#include <vector>
+#include "../../common/rodinia_verify.h"
 
  
  
@@ -15,6 +21,8 @@
  */ 
 #define GAMMA 1.4f
 #define iterations 1
+#define CFD_ABS_TOLERANCE 1.0e-4f
+#define CFD_REL_TOLERANCE 1.0e-4f
 // #ifndef block_length
 // 	#define block_length 192
 // #endif
@@ -413,6 +421,488 @@ void time_step(int j, int nelr, float* old_variables, float* variables, float* s
 	getLastCudaError("update failed");
 }
 
+struct CfdArguments
+{
+	const char* data_file_name;
+	bool verify_cpu;
+};
+
+static CfdArguments parse_arguments(int argc, char** argv)
+{
+	CfdArguments args = {0, false};
+	for(int i = 1; i < argc; i++)
+	{
+		if(std::strcmp(argv[i], "--verify-cpu") == 0)
+		{
+			args.verify_cpu = true;
+			continue;
+		}
+		if(args.data_file_name == 0)
+		{
+			args.data_file_name = argv[i];
+			continue;
+		}
+		std::cerr << "unexpected argument: " << argv[i] << std::endl;
+		std::exit(1);
+	}
+	return args;
+}
+
+static void setup_far_field(
+	float* h_ff_variable,
+	float3& h_ff_flux_contribution_momentum_x,
+	float3& h_ff_flux_contribution_momentum_y,
+	float3& h_ff_flux_contribution_momentum_z,
+	float3& h_ff_flux_contribution_density_energy)
+{
+	const float angle_of_attack = float(3.1415926535897931 / 180.0f) * float(deg_angle_of_attack);
+
+	h_ff_variable[VAR_DENSITY] = float(1.4);
+
+	float ff_pressure = float(1.0f);
+	float ff_speed_of_sound = sqrt(GAMMA*ff_pressure / h_ff_variable[VAR_DENSITY]);
+	float ff_speed = float(ff_mach)*ff_speed_of_sound;
+
+	float3 ff_velocity;
+	ff_velocity.x = ff_speed*float(cos((float)angle_of_attack));
+	ff_velocity.y = ff_speed*float(sin((float)angle_of_attack));
+	ff_velocity.z = 0.0f;
+
+	h_ff_variable[VAR_MOMENTUM+0] = h_ff_variable[VAR_DENSITY] * ff_velocity.x;
+	h_ff_variable[VAR_MOMENTUM+1] = h_ff_variable[VAR_DENSITY] * ff_velocity.y;
+	h_ff_variable[VAR_MOMENTUM+2] = h_ff_variable[VAR_DENSITY] * ff_velocity.z;
+
+	h_ff_variable[VAR_DENSITY_ENERGY] =
+		h_ff_variable[VAR_DENSITY]*(float(0.5f)*(ff_speed*ff_speed)) +
+		(ff_pressure / float(GAMMA-1.0f));
+
+	float3 h_ff_momentum;
+	h_ff_momentum.x = *(h_ff_variable+VAR_MOMENTUM+0);
+	h_ff_momentum.y = *(h_ff_variable+VAR_MOMENTUM+1);
+	h_ff_momentum.z = *(h_ff_variable+VAR_MOMENTUM+2);
+	compute_flux_contribution(
+		h_ff_variable[VAR_DENSITY],
+		h_ff_momentum,
+		h_ff_variable[VAR_DENSITY_ENERGY],
+		ff_pressure,
+		ff_velocity,
+		h_ff_flux_contribution_momentum_x,
+		h_ff_flux_contribution_momentum_y,
+		h_ff_flux_contribution_momentum_z,
+		h_ff_flux_contribution_density_energy);
+}
+
+static bool read_domain(
+	const char* data_file_name,
+	int& nel,
+	int& nelr,
+	std::vector<float>& areas,
+	std::vector<int>& elements_surrounding_elements,
+	std::vector<float>& normals)
+{
+	std::ifstream file(data_file_name);
+	if(!file)
+	{
+		std::cerr << "Cannot open CFD input file: " << data_file_name << std::endl;
+		return false;
+	}
+
+	file >> nel;
+	nelr = BLOCK_SIZE_0*((nel / BLOCK_SIZE_0 )+ std::min(1, nel % BLOCK_SIZE_0));
+
+	areas.assign(nelr, 0.0f);
+	elements_surrounding_elements.assign(nelr*NNB, 0);
+	normals.assign(nelr*NDIM*NNB, 0.0f);
+
+	for(int i = 0; i < nel; i++)
+	{
+		file >> areas[i];
+		for(int j = 0; j < NNB; j++)
+		{
+			file >> elements_surrounding_elements[i + j*nelr];
+			if(elements_surrounding_elements[i+j*nelr] < 0)
+				elements_surrounding_elements[i+j*nelr] = -1;
+			elements_surrounding_elements[i + j*nelr]--;
+
+			for(int k = 0; k < NDIM; k++)
+			{
+				file >> normals[i + (j + k*NNB)*nelr];
+				normals[i + (j + k*NNB)*nelr] = -normals[i + (j + k*NNB)*nelr];
+			}
+		}
+	}
+
+	int last = nel-1;
+	for(int i = nel; i < nelr; i++)
+	{
+		areas[i] = areas[last];
+		for(int j = 0; j < NNB; j++)
+		{
+			elements_surrounding_elements[i + j*nelr] =
+				elements_surrounding_elements[last + j*nelr];
+			for(int k = 0; k < NDIM; k++)
+				normals[i + (j + k*NNB)*nelr] = normals[last + (j + k*NNB)*nelr];
+		}
+	}
+	return true;
+}
+
+static void cpu_copy(float* dst, const float* src, int count)
+{
+	for(int i = 0; i < count; i++)
+		dst[i] = src[i];
+}
+
+static void cpu_initialize_variables(int nelr, float* variables, const float* h_ff_variable)
+{
+	for(int i = 0; i < nelr; i++)
+		for(int j = 0; j < NVAR; j++)
+			variables[i + j*nelr] = h_ff_variable[j];
+}
+
+static void cpu_compute_velocity(float density, const float3& momentum, float3& velocity)
+{
+	velocity.x = momentum.x / density;
+	velocity.y = momentum.y / density;
+	velocity.z = momentum.z / density;
+}
+
+static float cpu_compute_speed_sqd(const float3& velocity)
+{
+	return velocity.x*velocity.x + velocity.y*velocity.y + velocity.z*velocity.z;
+}
+
+static float cpu_compute_pressure(float density, float density_energy, float speed_sqd)
+{
+	return (float(GAMMA)-float(1.0f))*(density_energy - float(0.5f)*density*speed_sqd);
+}
+
+static float cpu_compute_speed_of_sound(float density, float pressure)
+{
+	return sqrtf(float(GAMMA)*pressure/density);
+}
+
+static void cpu_compute_step_factor(
+	int nelr,
+	const float* variables,
+	const float* areas,
+	float* step_factors)
+{
+	for(int i = 0; i < nelr; i++)
+	{
+		float density = variables[i + VAR_DENSITY*nelr];
+		float3 momentum;
+		momentum.x = variables[i + (VAR_MOMENTUM+0)*nelr];
+		momentum.y = variables[i + (VAR_MOMENTUM+1)*nelr];
+		momentum.z = variables[i + (VAR_MOMENTUM+2)*nelr];
+
+		float density_energy = variables[i + VAR_DENSITY_ENERGY*nelr];
+		float3 velocity;
+		cpu_compute_velocity(density, momentum, velocity);
+		float speed_sqd = cpu_compute_speed_sqd(velocity);
+		float pressure = cpu_compute_pressure(density, density_energy, speed_sqd);
+		float speed_of_sound = cpu_compute_speed_of_sound(density, pressure);
+
+		step_factors[i] = float(0.5f) /
+			(sqrtf(areas[i]) * (sqrtf(speed_sqd) + speed_of_sound));
+	}
+}
+
+static void cpu_compute_flux(
+	int nelr,
+	const int* elements_surrounding_elements,
+	const float* normals,
+	const float* variables,
+	float* fluxes,
+	const float* h_ff_variable,
+	const float3& h_ff_flux_contribution_momentum_x,
+	const float3& h_ff_flux_contribution_momentum_y,
+	const float3& h_ff_flux_contribution_momentum_z,
+	const float3& h_ff_flux_contribution_density_energy)
+{
+	const float smoothing_coefficient = float(0.2f);
+	for(int i = 0; i < nelr; i++)
+	{
+		float density_i = variables[i + VAR_DENSITY*nelr];
+		float3 momentum_i;
+		momentum_i.x = variables[i + (VAR_MOMENTUM+0)*nelr];
+		momentum_i.y = variables[i + (VAR_MOMENTUM+1)*nelr];
+		momentum_i.z = variables[i + (VAR_MOMENTUM+2)*nelr];
+		float density_energy_i = variables[i + VAR_DENSITY_ENERGY*nelr];
+
+		float3 velocity_i;
+		cpu_compute_velocity(density_i, momentum_i, velocity_i);
+		float speed_sqd_i = cpu_compute_speed_sqd(velocity_i);
+		float speed_i = sqrtf(speed_sqd_i);
+		float pressure_i = cpu_compute_pressure(density_i, density_energy_i, speed_sqd_i);
+		float speed_of_sound_i = cpu_compute_speed_of_sound(density_i, pressure_i);
+
+		float3 flux_contribution_i_momentum_x, flux_contribution_i_momentum_y;
+		float3 flux_contribution_i_momentum_z, flux_contribution_i_density_energy;
+		compute_flux_contribution(
+			density_i,
+			momentum_i,
+			density_energy_i,
+			pressure_i,
+			velocity_i,
+			flux_contribution_i_momentum_x,
+			flux_contribution_i_momentum_y,
+			flux_contribution_i_momentum_z,
+			flux_contribution_i_density_energy);
+
+		float flux_i_density = float(0.0f);
+		float3 flux_i_momentum = {float(0.0f), float(0.0f), float(0.0f)};
+		float flux_i_density_energy = float(0.0f);
+
+		for(int j = 0; j < NNB; j++)
+		{
+			int nb = elements_surrounding_elements[i + j*nelr];
+			float3 normal;
+			normal.x = normals[i + (j + 0*NNB)*nelr];
+			normal.y = normals[i + (j + 1*NNB)*nelr];
+			normal.z = normals[i + (j + 2*NNB)*nelr];
+			float normal_len = sqrtf(normal.x*normal.x + normal.y*normal.y + normal.z*normal.z);
+			float factor;
+
+			if(nb >= 0)
+			{
+				float density_nb = variables[nb + VAR_DENSITY*nelr];
+				float3 momentum_nb;
+				momentum_nb.x = variables[nb + (VAR_MOMENTUM+0)*nelr];
+				momentum_nb.y = variables[nb + (VAR_MOMENTUM+1)*nelr];
+				momentum_nb.z = variables[nb + (VAR_MOMENTUM+2)*nelr];
+				float density_energy_nb = variables[nb + VAR_DENSITY_ENERGY*nelr];
+				float3 velocity_nb;
+				cpu_compute_velocity(density_nb, momentum_nb, velocity_nb);
+				float speed_sqd_nb = cpu_compute_speed_sqd(velocity_nb);
+				float pressure_nb = cpu_compute_pressure(density_nb, density_energy_nb, speed_sqd_nb);
+				float speed_of_sound_nb = cpu_compute_speed_of_sound(density_nb, pressure_nb);
+				float3 flux_contribution_nb_momentum_x, flux_contribution_nb_momentum_y;
+				float3 flux_contribution_nb_momentum_z, flux_contribution_nb_density_energy;
+				compute_flux_contribution(
+					density_nb,
+					momentum_nb,
+					density_energy_nb,
+					pressure_nb,
+					velocity_nb,
+					flux_contribution_nb_momentum_x,
+					flux_contribution_nb_momentum_y,
+					flux_contribution_nb_momentum_z,
+					flux_contribution_nb_density_energy);
+
+				factor = -normal_len*smoothing_coefficient*float(0.5f)*
+					(speed_i + sqrtf(speed_sqd_nb) + speed_of_sound_i + speed_of_sound_nb);
+				flux_i_density += factor*(density_i-density_nb);
+				flux_i_density_energy += factor*(density_energy_i-density_energy_nb);
+				flux_i_momentum.x += factor*(momentum_i.x-momentum_nb.x);
+				flux_i_momentum.y += factor*(momentum_i.y-momentum_nb.y);
+				flux_i_momentum.z += factor*(momentum_i.z-momentum_nb.z);
+
+				factor = float(0.5f)*normal.x;
+				flux_i_density += factor*(momentum_nb.x+momentum_i.x);
+				flux_i_density_energy += factor*
+					(flux_contribution_nb_density_energy.x+flux_contribution_i_density_energy.x);
+				flux_i_momentum.x += factor*
+					(flux_contribution_nb_momentum_x.x+flux_contribution_i_momentum_x.x);
+				flux_i_momentum.y += factor*
+					(flux_contribution_nb_momentum_y.x+flux_contribution_i_momentum_y.x);
+				flux_i_momentum.z += factor*
+					(flux_contribution_nb_momentum_z.x+flux_contribution_i_momentum_z.x);
+
+				factor = float(0.5f)*normal.y;
+				flux_i_density += factor*(momentum_nb.y+momentum_i.y);
+				flux_i_density_energy += factor*
+					(flux_contribution_nb_density_energy.y+flux_contribution_i_density_energy.y);
+				flux_i_momentum.x += factor*
+					(flux_contribution_nb_momentum_x.y+flux_contribution_i_momentum_x.y);
+				flux_i_momentum.y += factor*
+					(flux_contribution_nb_momentum_y.y+flux_contribution_i_momentum_y.y);
+				flux_i_momentum.z += factor*
+					(flux_contribution_nb_momentum_z.y+flux_contribution_i_momentum_z.y);
+
+				factor = float(0.5f)*normal.z;
+				flux_i_density += factor*(momentum_nb.z+momentum_i.z);
+				flux_i_density_energy += factor*
+					(flux_contribution_nb_density_energy.z+flux_contribution_i_density_energy.z);
+				flux_i_momentum.x += factor*
+					(flux_contribution_nb_momentum_x.z+flux_contribution_i_momentum_x.z);
+				flux_i_momentum.y += factor*
+					(flux_contribution_nb_momentum_y.z+flux_contribution_i_momentum_y.z);
+				flux_i_momentum.z += factor*
+					(flux_contribution_nb_momentum_z.z+flux_contribution_i_momentum_z.z);
+			}
+			else if(nb == -1)
+			{
+				flux_i_momentum.x += normal.x*pressure_i;
+				flux_i_momentum.y += normal.y*pressure_i;
+				flux_i_momentum.z += normal.z*pressure_i;
+			}
+			else if(nb == -2)
+			{
+				factor = float(0.5f)*normal.x;
+				flux_i_density += factor*(h_ff_variable[VAR_MOMENTUM+0]+momentum_i.x);
+				flux_i_density_energy += factor*
+					(h_ff_flux_contribution_density_energy.x+flux_contribution_i_density_energy.x);
+				flux_i_momentum.x += factor*
+					(h_ff_flux_contribution_momentum_x.x + flux_contribution_i_momentum_x.x);
+				flux_i_momentum.y += factor*
+					(h_ff_flux_contribution_momentum_y.x + flux_contribution_i_momentum_y.x);
+				flux_i_momentum.z += factor*
+					(h_ff_flux_contribution_momentum_z.x + flux_contribution_i_momentum_z.x);
+
+				factor = float(0.5f)*normal.y;
+				flux_i_density += factor*(h_ff_variable[VAR_MOMENTUM+1]+momentum_i.y);
+				flux_i_density_energy += factor*
+					(h_ff_flux_contribution_density_energy.y+flux_contribution_i_density_energy.y);
+				flux_i_momentum.x += factor*
+					(h_ff_flux_contribution_momentum_x.y + flux_contribution_i_momentum_x.y);
+				flux_i_momentum.y += factor*
+					(h_ff_flux_contribution_momentum_y.y + flux_contribution_i_momentum_y.y);
+				flux_i_momentum.z += factor*
+					(h_ff_flux_contribution_momentum_z.y + flux_contribution_i_momentum_z.y);
+
+				factor = float(0.5f)*normal.z;
+				flux_i_density += factor*(h_ff_variable[VAR_MOMENTUM+2]+momentum_i.z);
+				flux_i_density_energy += factor*
+					(h_ff_flux_contribution_density_energy.z+flux_contribution_i_density_energy.z);
+				flux_i_momentum.x += factor*
+					(h_ff_flux_contribution_momentum_x.z + flux_contribution_i_momentum_x.z);
+				flux_i_momentum.y += factor*
+					(h_ff_flux_contribution_momentum_y.z + flux_contribution_i_momentum_y.z);
+				flux_i_momentum.z += factor*
+					(h_ff_flux_contribution_momentum_z.z + flux_contribution_i_momentum_z.z);
+			}
+		}
+
+		fluxes[i + VAR_DENSITY*nelr] = flux_i_density;
+		fluxes[i + (VAR_MOMENTUM+0)*nelr] = flux_i_momentum.x;
+		fluxes[i + (VAR_MOMENTUM+1)*nelr] = flux_i_momentum.y;
+		fluxes[i + (VAR_MOMENTUM+2)*nelr] = flux_i_momentum.z;
+		fluxes[i + VAR_DENSITY_ENERGY*nelr] = flux_i_density_energy;
+	}
+}
+
+static void cpu_time_step(
+	int j,
+	int nelr,
+	const float* old_variables,
+	float* variables,
+	const float* step_factors,
+	const float* fluxes)
+{
+	for(int i = 0; i < nelr; i++)
+	{
+		float factor = step_factors[i]/float(RK+1-j);
+
+		variables[i + VAR_DENSITY*nelr] =
+			old_variables[i + VAR_DENSITY*nelr] + factor*fluxes[i + VAR_DENSITY*nelr];
+		variables[i + VAR_DENSITY_ENERGY*nelr] =
+			old_variables[i + VAR_DENSITY_ENERGY*nelr] +
+			factor*fluxes[i + VAR_DENSITY_ENERGY*nelr];
+		variables[i + (VAR_MOMENTUM+0)*nelr] =
+			old_variables[i + (VAR_MOMENTUM+0)*nelr] + factor*fluxes[i + (VAR_MOMENTUM+0)*nelr];
+		variables[i + (VAR_MOMENTUM+1)*nelr] =
+			old_variables[i + (VAR_MOMENTUM+1)*nelr] + factor*fluxes[i + (VAR_MOMENTUM+1)*nelr];
+		variables[i + (VAR_MOMENTUM+2)*nelr] =
+			old_variables[i + (VAR_MOMENTUM+2)*nelr] + factor*fluxes[i + (VAR_MOMENTUM+2)*nelr];
+	}
+}
+
+static bool run_cpu_reference(
+	const char* data_file_name,
+	int expected_nel,
+	int expected_nelr,
+	std::vector<float>& variables)
+{
+	int nel;
+	int nelr;
+	std::vector<float> areas;
+	std::vector<int> elements_surrounding_elements;
+	std::vector<float> normals;
+	if(!read_domain(data_file_name, nel, nelr, areas, elements_surrounding_elements, normals))
+		return false;
+	if(nel != expected_nel || nelr != expected_nelr)
+	{
+		std::cerr << "CFD CPU reference input mismatch: got nel=" << nel
+			<< " nelr=" << nelr << " expected nel=" << expected_nel
+			<< " nelr=" << expected_nelr << std::endl;
+		return false;
+	}
+
+	float h_ff_variable[NVAR];
+	float3 h_ff_flux_contribution_momentum_x;
+	float3 h_ff_flux_contribution_momentum_y;
+	float3 h_ff_flux_contribution_momentum_z;
+	float3 h_ff_flux_contribution_density_energy;
+	setup_far_field(
+		h_ff_variable,
+		h_ff_flux_contribution_momentum_x,
+		h_ff_flux_contribution_momentum_y,
+		h_ff_flux_contribution_momentum_z,
+		h_ff_flux_contribution_density_energy);
+
+	variables.assign(nelr*NVAR, 0.0f);
+	std::vector<float> old_variables(nelr*NVAR, 0.0f);
+	std::vector<float> fluxes(nelr*NVAR, 0.0f);
+	std::vector<float> step_factors(nelr, 0.0f);
+	cpu_initialize_variables(nelr, variables.data(), h_ff_variable);
+
+	for(int i = 0; i < iterations; i++)
+	{
+		cpu_copy(old_variables.data(), variables.data(), nelr*NVAR);
+		cpu_compute_step_factor(nelr, variables.data(), areas.data(), step_factors.data());
+
+		for(int j = 0; j < RK; j++)
+		{
+			cpu_compute_flux(
+				nelr,
+				elements_surrounding_elements.data(),
+				normals.data(),
+				variables.data(),
+				fluxes.data(),
+				h_ff_variable,
+				h_ff_flux_contribution_momentum_x,
+				h_ff_flux_contribution_momentum_y,
+				h_ff_flux_contribution_momentum_z,
+				h_ff_flux_contribution_density_energy);
+			cpu_time_step(j, nelr, old_variables.data(), variables.data(), step_factors.data(), fluxes.data());
+		}
+	}
+
+	return true;
+}
+
+static bool verify_cpu_reference(float* device_variables, const char* data_file_name, int nel, int nelr)
+{
+	std::vector<float> actual(nelr*NVAR);
+	download<float>(actual.data(), device_variables, nelr*NVAR);
+
+	std::vector<float> expected;
+	if(!run_cpu_reference(data_file_name, nel, nelr, expected))
+		return false;
+
+	for(int var = 0; var < NVAR; var++)
+	{
+		for(int i = 0; i < nel; i++)
+		{
+			int index = i + var*nelr;
+			float diff = fabsf(actual[index] - expected[index]);
+			float tolerance = CFD_ABS_TOLERANCE + CFD_REL_TOLERANCE*fabsf(expected[index]);
+			if(!std::isfinite(actual[index]) || !std::isfinite(expected[index]) || diff > tolerance)
+			{
+				std::cerr << "CFD CPU reference mismatch at variable " << var
+					<< " cell " << i << ": actual=" << actual[index]
+					<< " expected=" << expected[index] << " diff=" << diff
+					<< " tolerance=" << tolerance << std::endl;
+				return false;
+			}
+		}
+	}
+
+	rodinia_print_pass("CFD CPU reference verification");
+	return true;
+}
+
 /*
  * Main function
  */
@@ -420,12 +910,13 @@ int main(int argc, char** argv)
 {
   printf("WG size of kernel:initialize = %d, WG size of kernel:compute_step_factor = %d, WG size of kernel:compute_flux = %d, WG size of kernel:time_step = %d\n", BLOCK_SIZE_1, BLOCK_SIZE_2, BLOCK_SIZE_3, BLOCK_SIZE_4);
 
-	if (argc < 2)
+	CfdArguments args = parse_arguments(argc, argv);
+	if (args.data_file_name == 0)
 	{
 		std::cout << "specify data file name" << std::endl;
 		return 0;
 	}
-	const char* data_file_name = argv[1];
+	const char* data_file_name = args.data_file_name;
 	
 	cudaDeviceProp prop;
 	int dev;
@@ -439,34 +930,16 @@ int main(int argc, char** argv)
 	// set far field conditions and load them into constant memory on the gpu
 	{
 		float h_ff_variable[NVAR];
-		const float angle_of_attack = float(3.1415926535897931 / 180.0f) * float(deg_angle_of_attack);
-		
-		h_ff_variable[VAR_DENSITY] = float(1.4);
-		
-		float ff_pressure = float(1.0f);
-		float ff_speed_of_sound = sqrt(GAMMA*ff_pressure / h_ff_variable[VAR_DENSITY]);
-		float ff_speed = float(ff_mach)*ff_speed_of_sound;
-		
-		float3 ff_velocity;
-		ff_velocity.x = ff_speed*float(cos((float)angle_of_attack));
-		ff_velocity.y = ff_speed*float(sin((float)angle_of_attack));
-		ff_velocity.z = 0.0f;
-		
-		h_ff_variable[VAR_MOMENTUM+0] = h_ff_variable[VAR_DENSITY] * ff_velocity.x;
-		h_ff_variable[VAR_MOMENTUM+1] = h_ff_variable[VAR_DENSITY] * ff_velocity.y;
-		h_ff_variable[VAR_MOMENTUM+2] = h_ff_variable[VAR_DENSITY] * ff_velocity.z;
-				
-		h_ff_variable[VAR_DENSITY_ENERGY] = h_ff_variable[VAR_DENSITY]*(float(0.5f)*(ff_speed*ff_speed)) + (ff_pressure / float(GAMMA-1.0f));
-
-		float3 h_ff_momentum;
-		h_ff_momentum.x = *(h_ff_variable+VAR_MOMENTUM+0);
-		h_ff_momentum.y = *(h_ff_variable+VAR_MOMENTUM+1);
-		h_ff_momentum.z = *(h_ff_variable+VAR_MOMENTUM+2);
 		float3 h_ff_flux_contribution_momentum_x;
 		float3 h_ff_flux_contribution_momentum_y;
 		float3 h_ff_flux_contribution_momentum_z;
 		float3 h_ff_flux_contribution_density_energy;
-		compute_flux_contribution(h_ff_variable[VAR_DENSITY], h_ff_momentum, h_ff_variable[VAR_DENSITY_ENERGY], ff_pressure, ff_velocity, h_ff_flux_contribution_momentum_x, h_ff_flux_contribution_momentum_y, h_ff_flux_contribution_momentum_z, h_ff_flux_contribution_density_energy);
+		setup_far_field(
+			h_ff_variable,
+			h_ff_flux_contribution_momentum_x,
+			h_ff_flux_contribution_momentum_y,
+			h_ff_flux_contribution_momentum_z,
+			h_ff_flux_contribution_density_energy);
 
 		// copy far field conditions to the gpu
 		checkCudaErrors( cudaMemcpyToSymbol(ff_variable,          h_ff_variable,          NVAR*sizeof(float)) );
@@ -518,12 +991,12 @@ int main(int argc, char** argv)
 		{
 			h_areas[i] = h_areas[last];
 			for(int j = 0; j < NNB; j++)
-			{
-				// duplicate the last element
-				h_elements_surrounding_elements[i + j*nelr] = h_elements_surrounding_elements[last + j*nelr];	
-				for(int k = 0; k < NDIM; k++) h_normals[last + (j + k*NNB)*nelr] = h_normals[last + (j + k*NNB)*nelr];
+				{
+					// duplicate the last element
+					h_elements_surrounding_elements[i + j*nelr] = h_elements_surrounding_elements[last + j*nelr];
+					for(int k = 0; k < NDIM; k++) h_normals[i + (j + k*NNB)*nelr] = h_normals[last + (j + k*NNB)*nelr];
+				}
 			}
-		}
 		
 		areas = alloc<float>(nelr);
 		upload<float>(areas, h_areas, nelr);
@@ -592,6 +1065,12 @@ int main(int argc, char** argv)
 	dump(variables, nel, nelr);
 	std::cout << "Saved solution..." << std::endl;
 
+	int status = 0;
+	if(args.verify_cpu && !verify_cpu_reference(variables, data_file_name, nel, nelr))
+	{
+		rodinia_print_fail("CFD CPU reference verification");
+		status = 1;
+	}
 	
 	std::cout << "Cleaning up..." << std::endl;
 	dealloc<float>(areas);
@@ -605,5 +1084,5 @@ int main(int argc, char** argv)
 
 	std::cout << "Done..." << std::endl;
 
-	return 0;
+	return status;
 }

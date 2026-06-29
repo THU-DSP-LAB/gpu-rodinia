@@ -38,7 +38,7 @@ int work_2(	int xmax,
 	//		COUNTERS, POINTERS
 	//============================================================60
 
-	long memory;
+	long long memory;
 	int i;
 	int pointer;
 
@@ -98,10 +98,11 @@ int work_2(	int xmax,
 	//		MEMORY CHECK
 	//============================================================60
 
-	memory = workload*(xmax+1)*EQUATIONS*4;
-	if(memory>1000000000){
+	if(workMemoryBytes(	workload,
+						((long long)xmax + 1) * EQUATIONS * (long long)sizeof(fp),
+						&memory) != 0){
 		printf("ERROR: trying to allocate more than 1.0GB of memory, decrease workload and span parameters or change memory parameter\n");
-		return 0;
+		return -1;
 	}
 
 	//============================================================60
@@ -168,11 +169,13 @@ int work_2(	int xmax,
 
 	for(i=0; i<workload; i++){
 		pointer = i*((xmax+1)*EQUATIONS) + 0*(EQUATIONS);
-		read("data/myocyte/y.txt",
+		if(read("../../data/myocyte/y.txt",
 					&y[pointer],
 					91,
 					1,
-					0);
+					0) != 0){
+			return -1;
+		}
 	}
 	cudaMemcpy(d_y, y, y_mem, cudaMemcpyHostToDevice);
 
@@ -182,11 +185,13 @@ int work_2(	int xmax,
 
 	for(i=0; i<workload; i++){
 		pointer = i*PARAMETERS;
-		read("data/myocyte/params.txt",
+		if(read("../../data/myocyte/params.txt",
 					&params[pointer],
 					18,
 					1,
-					0);
+					0) != 0){
+			return -1;
+		}
 	}
 	cudaMemcpy(d_params, params, params_mem, cudaMemcpyHostToDevice);
 

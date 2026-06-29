@@ -52,7 +52,7 @@ lud_verify(float *m, float *lu, int size);
 void
 matrix_multiply(float *inputa, float *inputb, float *output, int size);
 
-void
+func_ret_t
 matrix_duplicate(float *src, float **dst, int matrix_dim);
 
 void

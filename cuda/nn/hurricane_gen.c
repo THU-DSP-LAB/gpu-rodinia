@@ -11,7 +11,7 @@ int main(int argc, char **argv)
   int year,month,date,hour,num,speed,press;
   float lat,lon;
   int hours[4] = {0,6,12,18};
-  char *name, fname[16];
+  char *name, fname[64];
   char names[21][10] = {"ALBERTO", "BERYL", "CHRIS","DEBBY","ERNESTO","FLORENCE","GORDON",
       "HELENE","ISAAC","JOYCE","KIRK","LESLIE","MICHAEL","NADINE","OSCAR","PATTY","RAFAEL",
       "SANDY","TONY","VALERIE","WILLIAM"};
@@ -29,7 +29,7 @@ int main(int argc, char **argv)
   
   for(j=0;j<num_files;j++)
   {
-    sprintf(fname, "data/cane%d_%d.db", num_files,j);
+    sprintf(fname, "../../data/nn/cane%d_%d.db", num_files,j);
     
     if ((fp = fopen(fname, "w")) == NULL) {
 		 fprintf(stderr, "Failed to open output file '%s'!\n", fname);

@@ -2,11 +2,13 @@ include ../../common/make.config
 
 # C compiler
 CC = gcc
+CXX = g++
 CC_FLAGS = -g  -O2
 
 # CUDA compiler
 NVCC = $(CUDA_DIR)/bin/nvcc
-NVCC_FLAGS = -I$(CUDA_DIR)/include
+NVCC_FLAGS = -I$(CUDA_DIR)/include $(CUDA_GENCODE_FLAGS) -DGPU
+CUDA_LIB_DIR ?= $(CUDA_DIR)/lib64
 
 # 'make dbg=1' enables NVCC debugging
 ifeq ($(dbg),1)
@@ -21,8 +23,8 @@ ifeq ($(emu),1)
 endif
 
 
-backprop: backprop.o facetrain.o imagenet.o backprop_cuda.o 
-	$(CC) $(CC_FLAGS) backprop.o facetrain.o imagenet.o backprop_cuda.o -o backprop -L$(CUDA_LIB_DIR) -lcuda -lcudart -lm
+backprop: backprop.o facetrain.o imagenet.o backprop_cuda.o backprop_result.o
+	$(CXX) $(CC_FLAGS) backprop.o facetrain.o imagenet.o backprop_cuda.o backprop_result.o -o backprop -L$(CUDA_LIB_DIR) -lcudart -lcuda -lm
 
 %.o: %.[ch]
 	$(CC) $(CC_FLAGS) $< -c
@@ -38,6 +40,9 @@ backprop_cuda.o: backprop_cuda.cu backprop.h
 
 imagenet.o: imagenet.c backprop.h
 	$(CC) $(CC_FLAGS) imagenet.c -c
+
+backprop_result.o: backprop_result.c backprop_result.h backprop.h
+	$(CC) $(CC_FLAGS) backprop_result.c -c
 
 
 clean:

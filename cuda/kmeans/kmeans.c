@@ -78,8 +78,242 @@
 #include <fcntl.h>
 #include <omp.h>
 #include "kmeans.h"
+#include "../../common/rodinia_verify.h"
 
 extern double wtime(void);
+
+#define KMEANS_ABS_TOLERANCE 0.01f
+#define KMEANS_REL_TOLERANCE 0.00001f
+
+typedef struct {
+	int npoints;
+	int nfeatures;
+	int nclusters;
+	float threshold;
+	float **features;
+} CpuKmeansConfig;
+
+static float **alloc_2d_float(int rows, int cols)
+{
+	float **values = (float **)malloc(rows * sizeof(float *));
+	if (values == NULL) {
+		return NULL;
+	}
+	values[0] = (float *)calloc(rows * cols, sizeof(float));
+	if (values[0] == NULL) {
+		free(values);
+		return NULL;
+	}
+	for (int row = 1; row < rows; row++) {
+		values[row] = values[row - 1] + cols;
+	}
+	return values;
+}
+
+static void free_2d_float(float **values)
+{
+	if (values == NULL) {
+		return;
+	}
+	free(values[0]);
+	free(values);
+}
+
+static int filter_verify_cpu_option(int argc, char **argv, char ***filtered_argv, int *verify_cpu)
+{
+	char **filtered = (char **)malloc((argc + 1) * sizeof(char *));
+	if (filtered == NULL) {
+		fprintf(stderr, "Cannot allocate Kmeans argument list\n");
+		return -1;
+	}
+
+	int filtered_argc = 1;
+	*verify_cpu = 0;
+	filtered[0] = argv[0];
+	for (int arg = 1; arg < argc; arg++) {
+		if (strcmp(argv[arg], "--verify-cpu") == 0) {
+			*verify_cpu = 1;
+			continue;
+		}
+		filtered[filtered_argc] = argv[arg];
+		filtered_argc++;
+	}
+	filtered[filtered_argc] = NULL;
+	*filtered_argv = filtered;
+	return filtered_argc;
+}
+
+static int initialize_cpu_clusters(const CpuKmeansConfig *config, float **clusters)
+{
+	int *initial = (int *)malloc(config->npoints * sizeof(int));
+	if (initial == NULL) {
+		fprintf(stderr, "Cannot allocate Kmeans CPU reference initial centers\n");
+		return -1;
+	}
+	for (int point = 0; point < config->npoints; point++) {
+		initial[point] = point;
+	}
+
+	int next = 0;
+	int initial_points = config->npoints;
+	for (int cluster = 0; cluster < config->nclusters && initial_points >= 0; cluster++) {
+		for (int feature = 0; feature < config->nfeatures; feature++) {
+			clusters[cluster][feature] = config->features[initial[next]][feature];
+		}
+		int temp = initial[next];
+		initial[next] = initial[initial_points - 1];
+		initial[initial_points - 1] = temp;
+		initial_points--;
+		next++;
+	}
+
+	free(initial);
+	return 0;
+}
+
+static int nearest_cpu_cluster(const CpuKmeansConfig *config, float **clusters, int point)
+{
+	int nearest = -1;
+	float min_dist = FLT_MAX;
+	for (int cluster = 0; cluster < config->nclusters; cluster++) {
+		float dist = 0.0f;
+		for (int feature = 0; feature < config->nfeatures; feature++) {
+			float diff = config->features[point][feature] - clusters[cluster][feature];
+			dist += diff * diff;
+		}
+		if (dist < min_dist) {
+			min_dist = dist;
+			nearest = cluster;
+		}
+	}
+	return nearest;
+}
+
+static int assign_cpu_memberships(
+	const CpuKmeansConfig *config,
+	float **clusters,
+	int *membership,
+	int *new_centers_len,
+	float **new_centers)
+{
+	int delta = 0;
+	for (int point = 0; point < config->npoints; point++) {
+		int cluster_id = nearest_cpu_cluster(config, clusters, point);
+		new_centers_len[cluster_id]++;
+		if (cluster_id != membership[point]) {
+			delta++;
+			membership[point] = cluster_id;
+		}
+		for (int feature = 0; feature < config->nfeatures; feature++) {
+			new_centers[cluster_id][feature] += config->features[point][feature];
+		}
+	}
+	return delta;
+}
+
+static void update_cpu_clusters(
+	const CpuKmeansConfig *config,
+	float **clusters,
+	int *new_centers_len,
+	float **new_centers)
+{
+	for (int cluster = 0; cluster < config->nclusters; cluster++) {
+		for (int feature = 0; feature < config->nfeatures; feature++) {
+			if (new_centers_len[cluster] > 0) {
+				clusters[cluster][feature] =
+					new_centers[cluster][feature] / new_centers_len[cluster];
+			}
+			new_centers[cluster][feature] = 0.0f;
+		}
+		new_centers_len[cluster] = 0;
+	}
+}
+
+static float **run_cpu_kmeans_reference(const CpuKmeansConfig *config)
+{
+	float **clusters = alloc_2d_float(config->nclusters, config->nfeatures);
+	float **new_centers = alloc_2d_float(config->nclusters, config->nfeatures);
+	int *new_centers_len = (int *)calloc(config->nclusters, sizeof(int));
+	int *membership = (int *)malloc(config->npoints * sizeof(int));
+	if (clusters == NULL || new_centers == NULL || new_centers_len == NULL || membership == NULL) {
+		fprintf(stderr, "Cannot allocate Kmeans CPU reference buffers\n");
+		free_2d_float(clusters);
+		free_2d_float(new_centers);
+		free(new_centers_len);
+		free(membership);
+		return NULL;
+	}
+
+	if (initialize_cpu_clusters(config, clusters) != 0) {
+		free_2d_float(clusters);
+		free_2d_float(new_centers);
+		free(new_centers_len);
+		free(membership);
+		return NULL;
+	}
+
+	for (int point = 0; point < config->npoints; point++) {
+		membership[point] = -1;
+	}
+
+	int loop = 0;
+	int delta;
+	do {
+		delta = assign_cpu_memberships(config, clusters, membership, new_centers_len, new_centers);
+		update_cpu_clusters(config, clusters, new_centers_len, new_centers);
+	} while (((float)delta > config->threshold) && (loop++ < 500));
+
+	free_2d_float(new_centers);
+	free(new_centers_len);
+	free(membership);
+	return clusters;
+}
+
+static int verify_cpu_reference(
+	float **actual,
+	float **features,
+	int nfeatures,
+	int npoints,
+	int nclusters,
+	float threshold)
+{
+	CpuKmeansConfig config;
+	config.npoints = npoints;
+	config.nfeatures = nfeatures;
+	config.nclusters = nclusters > npoints ? npoints : nclusters;
+	config.threshold = threshold;
+	config.features = features;
+
+	float **expected = run_cpu_kmeans_reference(&config);
+	if (expected == NULL) {
+		return -1;
+	}
+
+	for (int cluster = 0; cluster < config.nclusters; cluster++) {
+		for (int feature = 0; feature < config.nfeatures; feature++) {
+			float diff = fabsf(actual[cluster][feature] - expected[cluster][feature]);
+			float tolerance =
+				KMEANS_ABS_TOLERANCE + KMEANS_REL_TOLERANCE * fabsf(expected[cluster][feature]);
+			if (!isfinite(actual[cluster][feature]) ||
+				!isfinite(expected[cluster][feature]) ||
+				diff > tolerance) {
+				fprintf(stderr,
+					"Kmeans CPU reference mismatch at cluster %d feature %d: actual=%g expected=%g diff=%g tolerance=%g\n",
+					cluster,
+					feature,
+					actual[cluster][feature],
+					expected[cluster][feature],
+					diff,
+					tolerance);
+				free_2d_float(expected);
+				return -1;
+			}
+		}
+	}
+
+	free_2d_float(expected);
+	return rodinia_print_pass("Kmeans CPU reference verification");
+}
 
 
 
@@ -94,7 +328,8 @@ void usage(char *argv0) {
 		"    -l nloops        :iteration for each number of clusters [default=1]\n"
 		"    -b               :input file is in binary format\n"
         "    -r               :calculate RMSE                        [default=off]\n"
-		"    -o               :output cluster center coordinates     [default=off]\n";
+		"    -o               :output cluster center coordinates     [default=off]\n"
+		"    --verify-cpu     :compare final cluster centers with CPU reference\n";
     fprintf(stderr, help, argv0);
     exit(-1);
 }
@@ -103,7 +338,11 @@ void usage(char *argv0) {
 int setup(int argc, char **argv) {
 		int		opt;
  extern char   *optarg;
+ extern int    optind;
 		char   *filename = 0;
+		char  **filtered_argv = NULL;
+		int     filtered_argc;
+		int     verify_cpu = 0;
 		float  *buf;
 		char	line[1024];
 		int		isBinaryFile = 0;
@@ -127,8 +366,14 @@ int setup(int argc, char **argv) {
 		int		isOutput = 0;
 		//float	cluster_timing, io_timing;		
 
+		filtered_argc = filter_verify_cpu_option(argc, argv, &filtered_argv, &verify_cpu);
+		if (filtered_argc < 0) {
+			return 1;
+		}
+		optind = 1;
+
 		/* obtain command line arguments and change appropriate options */
-		while ( (opt=getopt(argc,argv,"i:t:m:n:l:bro"))!= EOF) {
+		while ( (opt=getopt(filtered_argc,filtered_argv,"i:t:m:n:l:bro"))!= EOF) {
         switch (opt) {
             case 'i': filename=optarg;
                       break;
@@ -146,14 +391,14 @@ int setup(int argc, char **argv) {
 					  break;
 		    case 'l': nloops = atoi(optarg);
 					  break;
-            case '?': usage(argv[0]);
+            case '?': usage(filtered_argv[0]);
                       break;
-            default: usage(argv[0]);
+            default: usage(filtered_argv[0]);
                       break;
         }
     }
 
-    if (filename == 0) usage(argv[0]);
+    if (filename == 0) usage(filtered_argv[0]);
 		
 	/* ============== I/O begin ==============*/
     /* get nfeatures and npoints */
@@ -264,6 +509,25 @@ int setup(int argc, char **argv) {
 			printf("\n\n");
 		}
 	}
+
+	if (verify_cpu &&
+		verify_cpu_reference(
+			cluster_centres,
+			features,
+			nfeatures,
+			npoints,
+			max_nclusters,
+			threshold) != 0) {
+		rodinia_print_fail("Kmeans CPU reference verification");
+		free(features[0]);
+		free(features);
+		if (cluster_centres != NULL) {
+			free(cluster_centres[0]);
+			free(cluster_centres);
+		}
+		free(filtered_argv);
+		return 1;
+	}
 	
 	len = (float) ((max_nclusters - min_nclusters + 1)*nloops);
 
@@ -299,7 +563,11 @@ int setup(int argc, char **argv) {
 
 	/* free up memory */
 	free(features[0]);
-	free(features);    
+	free(features);
+	if (cluster_centres != NULL) {
+		free(cluster_centres[0]);
+		free(cluster_centres);
+	}
+	free(filtered_argv);
     return(0);
 }
-

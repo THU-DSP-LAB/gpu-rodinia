@@ -176,8 +176,8 @@ __device__ void kernel_cam_2(	fp timeinst,
 	CaMKIItot = d_params[params_offset+2];
 	CaNtot = d_params[params_offset+3];
 	PP1tot = d_params[params_offset+4];
-	K = d_params[16];
-	Mg = d_params[17];
+	K = 135;
+	Mg = 1;
 
 	// variable references
 	offset_1 = valu_offset;

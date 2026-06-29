@@ -36,6 +36,21 @@ float **alloc_2d_dbl(int m, int n);
 extern "C"
 float squash(float x);
 
+static void copy_flat_weights_to_matrix(
+  float **matrix,
+  const float *flat_weights,
+  int rows,
+  int cols)
+{
+  int index = 0;
+
+  for (int row = 0; row < rows; row++) {
+    for (int col = 0; col < cols; col++) {
+      matrix[row][col] = flat_weights[index++];
+    }
+  }
+}
+
 double gettime() {
   struct timeval t;
   gettimeofday(&t,NULL);
@@ -45,13 +60,28 @@ double gettime() {
 unsigned int num_threads = 0;
 unsigned int num_blocks = 0;
 
+#define CUDA_CHECK(call)                                                         \
+  do {                                                                          \
+    cudaError_t cuda_status = (call);                                            \
+    if (cuda_status != cudaSuccess) {                                            \
+      fprintf(                                                                  \
+          stderr,                                                               \
+          "%s:%d: CUDA call failed: %s: %s\n",                                   \
+          __FILE__,                                                             \
+          __LINE__,                                                             \
+          #call,                                                                \
+          cudaGetErrorString(cuda_status));                                      \
+      exit(EXIT_FAILURE);                                                       \
+    }                                                                           \
+  } while (0)
+
 ////////////////////////////////////////////////////////////////////////////////
 // Program main
 ////////////////////////////////////////////////////////////////////////////////
 int
 main( int argc, char** argv) 
 {
-	setup(argc, argv);
+	return setup(argc, argv);
 }
 
 
@@ -78,7 +108,7 @@ void bpnn_train_cuda(BPNN *net, float *eo, float *eh)
   float *input_weights_one_dim;
   float *input_weights_prev_one_dim;
   num_blocks = in / 16;  
-  dim3  grid( 1 , num_blocks);
+  dim3  grid(num_blocks, 1);
   dim3  threads(16 , 16);
   
   input_weights_one_dim = (float *) malloc((in + 1)* (hid + 1) * sizeof(float));
@@ -94,10 +124,10 @@ void bpnn_train_cuda(BPNN *net, float *eo, float *eh)
     }
   }
   
-  cudaMalloc((void**) &input_cuda, (in + 1) * sizeof(float));
-  cudaMalloc((void**) &output_hidden_cuda, (hid + 1) * sizeof(float));
-  cudaMalloc((void**) &input_hidden_cuda, (in + 1) * (hid + 1) * sizeof(float));
-  cudaMalloc((void**) &hidden_partial_sum, num_blocks * WIDTH * sizeof(float));
+  CUDA_CHECK(cudaMalloc((void**) &input_cuda, (in + 1) * sizeof(float)));
+  CUDA_CHECK(cudaMalloc((void**) &output_hidden_cuda, (hid + 1) * sizeof(float)));
+  CUDA_CHECK(cudaMalloc((void**) &input_hidden_cuda, (in + 1) * (hid + 1) * sizeof(float)));
+  CUDA_CHECK(cudaMalloc((void**) &hidden_partial_sum, num_blocks * WIDTH * sizeof(float)));
   
   
 #endif
@@ -115,8 +145,8 @@ void bpnn_train_cuda(BPNN *net, float *eo, float *eh)
   
   //printf("in= %d, hid = %d, numblocks = %d\n", in, hid, num_blocks);
   
-  cudaMemcpy(input_cuda, net->input_units, (in + 1) * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(input_hidden_cuda, input_weights_one_dim, (in + 1) * (hid + 1) * sizeof(float), cudaMemcpyHostToDevice);
+  CUDA_CHECK(cudaMemcpy(input_cuda, net->input_units, (in + 1) * sizeof(float), cudaMemcpyHostToDevice));
+  CUDA_CHECK(cudaMemcpy(input_hidden_cuda, input_weights_one_dim, (in + 1) * (hid + 1) * sizeof(float), cudaMemcpyHostToDevice));
 
   
   
@@ -127,15 +157,10 @@ void bpnn_train_cuda(BPNN *net, float *eo, float *eh)
 											  in,
 											  hid);
  
-  cudaDeviceSynchronize();
+  CUDA_CHECK(cudaGetLastError());
+  CUDA_CHECK(cudaDeviceSynchronize());
   
-  cudaError_t error = cudaGetLastError();
-	if (error != cudaSuccess) {
-		printf("bpnn kernel error: %s\n", cudaGetErrorString(error));
-		exit(EXIT_FAILURE);
-	}
-  
-  cudaMemcpy(partial_sum, hidden_partial_sum, num_blocks * WIDTH * sizeof(float), cudaMemcpyDeviceToHost);
+  CUDA_CHECK(cudaMemcpy(partial_sum, hidden_partial_sum, num_blocks * WIDTH * sizeof(float), cudaMemcpyDeviceToHost));
      
   for (int j = 1; j <= hid; j++) {
     sum = 0.0;
@@ -150,6 +175,8 @@ void bpnn_train_cuda(BPNN *net, float *eo, float *eh)
   bpnn_layerforward(net->hidden_units, net->output_units, net->hidden_weights, hid, out);
   bpnn_output_error(net->output_delta, net->target, net->output_units, out, &out_err);
   bpnn_hidden_error(net->hidden_delta, hid, net->output_delta, out, net->hidden_weights, net->hidden_units, &hid_err);  
+  *eo = out_err;
+  *eh = hid_err;
   bpnn_adjust_weights(net->output_delta, out, net->hidden_units, hid, net->hidden_weights, net->hidden_prev_weights);
 
 #ifdef CPU
@@ -161,12 +188,12 @@ void bpnn_train_cuda(BPNN *net, float *eo, float *eh)
 
 #ifdef GPU
 
-  cudaMalloc((void**) &hidden_delta_cuda, (hid + 1) * sizeof(float));
-  cudaMalloc((void**) &input_prev_weights_cuda, (in + 1) * (hid + 1) * sizeof(float));
+  CUDA_CHECK(cudaMalloc((void**) &hidden_delta_cuda, (hid + 1) * sizeof(float)));
+  CUDA_CHECK(cudaMalloc((void**) &input_prev_weights_cuda, (in + 1) * (hid + 1) * sizeof(float)));
 
-  cudaMemcpy(hidden_delta_cuda, net->hidden_delta, (hid + 1) * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(input_prev_weights_cuda, input_weights_prev_one_dim, (in + 1) * (hid + 1) * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(input_hidden_cuda, input_weights_one_dim, (in + 1) * (hid + 1) * sizeof(float), cudaMemcpyHostToDevice);
+  CUDA_CHECK(cudaMemcpy(hidden_delta_cuda, net->hidden_delta, (hid + 1) * sizeof(float), cudaMemcpyHostToDevice));
+  CUDA_CHECK(cudaMemcpy(input_prev_weights_cuda, input_weights_prev_one_dim, (in + 1) * (hid + 1) * sizeof(float), cudaMemcpyHostToDevice));
+  CUDA_CHECK(cudaMemcpy(input_hidden_cuda, input_weights_one_dim, (in + 1) * (hid + 1) * sizeof(float), cudaMemcpyHostToDevice));
 
 
   bpnn_adjust_weights_cuda<<< grid, threads >>>(hidden_delta_cuda,  
@@ -176,9 +203,12 @@ void bpnn_train_cuda(BPNN *net, float *eo, float *eh)
 												input_hidden_cuda, 
 												input_prev_weights_cuda
 												);
+  CUDA_CHECK(cudaGetLastError());
+  CUDA_CHECK(cudaDeviceSynchronize());
 
-  cudaMemcpy(net->input_units, input_cuda, (in + 1) * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaMemcpy(input_weights_one_dim, input_hidden_cuda, (in + 1) * (hid + 1) * sizeof(float), cudaMemcpyDeviceToHost);
+  CUDA_CHECK(cudaMemcpy(net->input_units, input_cuda, (in + 1) * sizeof(float), cudaMemcpyDeviceToHost));
+  CUDA_CHECK(cudaMemcpy(input_weights_one_dim, input_hidden_cuda, (in + 1) * (hid + 1) * sizeof(float), cudaMemcpyDeviceToHost));
+  copy_flat_weights_to_matrix(net->input_weights, input_weights_one_dim, in + 1, hid + 1);
     
   cudaFree(input_cuda);
   cudaFree(output_hidden_cuda);

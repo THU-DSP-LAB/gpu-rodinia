@@ -6,6 +6,7 @@
 #include "needle.h"
 #include <cuda.h>
 #include <sys/time.h>
+#include "../../common/rodinia_verify.h"
 
 // includes, kernels
 #include "needle_kernel.cu"
@@ -26,7 +27,7 @@ float init_time = 0, mem_alloc_time = 0, h2d_time = 0, kernel_time = 0,
 
 ////////////////////////////////////////////////////////////////////////////////
 // declaration, forward
-void runTest( int argc, char** argv);
+int runTest( int argc, char** argv);
 
 
 int blosum62[24][24] = {
@@ -71,43 +72,125 @@ main( int argc, char** argv)
 
   printf("WG size of kernel = %d \n", BLOCK_SIZE);
 
-    runTest( argc, argv);
-
-    return EXIT_SUCCESS;
+    return runTest( argc, argv);
 }
 
 void usage(int argc, char **argv)
 {
-	fprintf(stderr, "Usage: %s <max_rows/max_cols> <penalty> \n", argv[0]);
+	fprintf(stderr, "Usage: %s <max_rows/max_cols> <penalty> [--verify-cpu]\n", argv[0]);
 	fprintf(stderr, "\t<dimension>  - x and y dimensions\n");
 	fprintf(stderr, "\t<penalty> - penalty(positive integer)\n");
 	exit(1);
 }
 
-void runTest( int argc, char** argv) 
+static int parse_options(int argc, char **argv, int *dimension, int *penalty, int *verify_cpu)
+{
+	if (argc < 3) {
+		return -1;
+	}
+	*dimension = atoi(argv[1]);
+	*penalty = atoi(argv[2]);
+	*verify_cpu = 0;
+	for (int arg = 3; arg < argc; arg++) {
+		if (strcmp(argv[arg], "--verify-cpu") == 0) {
+			*verify_cpu = 1;
+			continue;
+		}
+		fprintf(stderr, "Unknown option: %s\n", argv[arg]);
+		return -1;
+	}
+	if (*dimension <= 0 || (*dimension % 16) != 0) {
+		fprintf(stderr,"The dimension values must be a positive multiple of 16\n");
+		return -1;
+	}
+	if (*penalty <= 0) {
+		fprintf(stderr, "The penalty must be a positive integer\n");
+		return -1;
+	}
+	return 0;
+}
+
+static void initialize_inputs(int *input_itemsets, int *referrence, int max_rows, int max_cols, int penalty)
+{
+	for (int i = 0 ; i < max_cols; i++){
+		for (int j = 0 ; j < max_rows; j++){
+			input_itemsets[i*max_cols+j] = 0;
+		}
+	}
+
+	for( int i=1; i< max_rows ; i++){    //please define your own sequence.
+	   input_itemsets[i*max_cols] = rand() % 10 + 1;
+	}
+	for( int j=1; j< max_cols ; j++){    //please define your own sequence.
+	   input_itemsets[j] = rand() % 10 + 1;
+	}
+
+	for (int i = 1 ; i < max_cols; i++){
+		for (int j = 1 ; j < max_rows; j++){
+		referrence[i*max_cols+j] = blosum62[input_itemsets[i*max_cols]][input_itemsets[j]];
+		}
+	}
+
+	for( int i = 1; i< max_rows ; i++)
+	   input_itemsets[i*max_cols] = -i * penalty;
+	for( int j = 1; j< max_cols ; j++)
+	   input_itemsets[j] = -j * penalty;
+}
+
+static int verify_cpu_reference(
+	const int *actual,
+	const int *initial,
+	const int *referrence,
+	int max_rows,
+	int max_cols,
+	int penalty)
+{
+	int size = max_rows * max_cols;
+	int *expected = (int *)malloc(size * sizeof(int));
+	if (expected == NULL) {
+		fprintf(stderr, "Cannot allocate Needleman-Wunsch CPU reference matrix\n");
+		return -1;
+	}
+	memcpy(expected, initial, size * sizeof(int));
+	for (int row = 1; row < max_rows; row++) {
+		for (int col = 1; col < max_cols; col++) {
+			expected[row * max_cols + col] = maximum(
+				expected[(row - 1) * max_cols + col - 1] + referrence[row * max_cols + col],
+				expected[row * max_cols + col - 1] - penalty,
+				expected[(row - 1) * max_cols + col] - penalty);
+		}
+	}
+	for (int index = 0; index < size; index++) {
+		if (actual[index] != expected[index]) {
+			fprintf(stderr,
+				"Needleman-Wunsch CPU reference mismatch at index %d: actual=%d expected=%d\n",
+				index,
+				actual[index],
+				expected[index]);
+			free(expected);
+			return -1;
+		}
+	}
+	free(expected);
+	return rodinia_print_pass("Needleman-Wunsch CPU reference verification");
+}
+
+int runTest( int argc, char** argv) 
 {
     int max_rows, max_cols, penalty;
     int *input_itemsets, *output_itemsets, *referrence;
 	int *matrix_cuda,  *referrence_cuda;
 	int size;
+	int verify_cpu;
+	int status = EXIT_SUCCESS;
 	
     
     // the lengths of the two sequences should be able to divided by 16.
 	// And at current stage  max_rows needs to equal max_cols
-	if (argc == 3)
-	{
-		max_rows = atoi(argv[1]);
-		max_cols = atoi(argv[1]);
-		penalty = atoi(argv[2]);
+	if (parse_options(argc, argv, &max_rows, &penalty, &verify_cpu) != 0) {
+		usage(argc, argv);
 	}
-    else{
-	usage(argc, argv);
-    }
-	
-	if(atoi(argv[1])%16!=0){
-	fprintf(stderr,"The dimension values must be a multiple of 16\n");
-	exit(1);
-	}
+	max_cols = max_rows;
 	
 
 	max_rows = max_rows + 1;
@@ -122,33 +205,8 @@ void runTest( int argc, char** argv)
 
     srand ( 7 );
 	
-	
-    for (int i = 0 ; i < max_cols; i++){
-		for (int j = 0 ; j < max_rows; j++){
-			input_itemsets[i*max_cols+j] = 0;
-		}
-	}
-	
 	printf("Start Needleman-Wunsch\n");
-	
-	for( int i=1; i< max_rows ; i++){    //please define your own sequence. 
-       input_itemsets[i*max_cols] = rand() % 10 + 1;
-	}
-    for( int j=1; j< max_cols ; j++){    //please define your own sequence.
-       input_itemsets[j] = rand() % 10 + 1;
-	}
-
-
-	for (int i = 1 ; i < max_cols; i++){
-		for (int j = 1 ; j < max_rows; j++){
-		referrence[i*max_cols+j] = blosum62[input_itemsets[i*max_cols]][input_itemsets[j]];
-		}
-	}
-
-    for( int i = 1; i< max_rows ; i++)
-       input_itemsets[i*max_cols] = -i * penalty;
-	for( int j = 1; j< max_cols ; j++)
-       input_itemsets[j] = -j * penalty;
+	initialize_inputs(input_itemsets, referrence, max_rows, max_cols, penalty);
 
 
     size = max_cols * max_rows;
@@ -190,6 +248,10 @@ void runTest( int argc, char** argv)
 #endif
 
     cudaMemcpy(output_itemsets, matrix_cuda, sizeof(int) * size, cudaMemcpyDeviceToHost);
+	if (verify_cpu && verify_cpu_reference(output_itemsets, input_itemsets, referrence, max_rows, max_cols, penalty) != 0) {
+		rodinia_print_fail("Needleman-Wunsch CPU reference verification");
+		status = EXIT_FAILURE;
+	}
 	
 //#define TRACEBACK
 #ifdef TRACEBACK
@@ -262,5 +324,5 @@ void runTest( int argc, char** argv)
 #ifdef  TIMING
     printf("Exec: %f\n", kernel_time);
 #endif
+	return status;
 }
-

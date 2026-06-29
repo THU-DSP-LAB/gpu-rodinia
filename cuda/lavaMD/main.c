@@ -20,6 +20,8 @@
 #include <stdio.h>					// (in path known to compiler)			needed by printf
 #include <stdlib.h>					// (in path known to compiler)			needed by malloc
 #include <stdbool.h>				// (in path known to compiler)			needed by true/false
+#include <math.h>
+#include <string.h>
 
 //======================================================================================================================================================150
 //	UTILITIES
@@ -39,6 +41,111 @@
 //======================================================================================================================================================150
 
 #include "./kernel/kernel_gpu_cuda_wrapper.h"	// (in library path specified here)
+#include "../../common/rodinia_verify.h"
+
+enum {
+	EXIT_STATUS_SUCCESS = 0,
+	EXIT_STATUS_FAILURE = 1
+};
+
+static const fp LAVAMD_REFERENCE_ABS_TOLERANCE = 1.0e-8;
+static const fp LAVAMD_REFERENCE_REL_TOLERANCE = 1.0e-8;
+
+static int fail_argument(const char* message)
+{
+	printf("ERROR: %s\n", message);
+	return EXIT_STATUS_FAILURE;
+}
+
+static void compute_lavamd_reference(
+		par_str par_cpu,
+		dim_str dim_cpu,
+		const box_str* box_cpu,
+		const FOUR_VECTOR* rv_cpu,
+		const fp* qv_cpu,
+		FOUR_VECTOR* fv_reference)
+{
+	fp a2 = 2.0 * par_cpu.alpha * par_cpu.alpha;
+
+	for(long index=0; index<dim_cpu.space_elem; index=index+1){
+		fv_reference[index].v = 0;
+		fv_reference[index].x = 0;
+		fv_reference[index].y = 0;
+		fv_reference[index].z = 0;
+	}
+
+	for(int bx=0; bx<dim_cpu.number_boxes; bx=bx+1){
+		int first_i = box_cpu[bx].offset;
+		for(int neighbor=0; neighbor<(1+box_cpu[bx].nn); neighbor=neighbor+1){
+			int pointer = (neighbor==0) ? bx : box_cpu[bx].nei[neighbor-1].number;
+			int first_j = box_cpu[pointer].offset;
+			for(int i=0; i<NUMBER_PAR_PER_BOX; i=i+1){
+				const FOUR_VECTOR rA = rv_cpu[first_i+i];
+				FOUR_VECTOR* fA = &fv_reference[first_i+i];
+				for(int j=0; j<NUMBER_PAR_PER_BOX; j=j+1){
+					const FOUR_VECTOR rB = rv_cpu[first_j+j];
+					fp r2 = rA.v + rB.v - DOT(rA, rB);
+					fp u2 = a2 * r2;
+					fp vij = exp(-u2);
+					fp fs = 2 * vij;
+					fp dx = rA.x - rB.x;
+					fp fxij = fs * dx;
+					fp dy = rA.y - rB.y;
+					fp fyij = fs * dy;
+					fp dz = rA.z - rB.z;
+					fp fzij = fs * dz;
+
+					fA->v += qv_cpu[first_j+j] * vij;
+					fA->x += qv_cpu[first_j+j] * fxij;
+					fA->y += qv_cpu[first_j+j] * fyij;
+					fA->z += qv_cpu[first_j+j] * fzij;
+				}
+			}
+		}
+	}
+}
+
+static int compare_force_component(const char* component, long index, fp actual, fp expected)
+{
+	fp diff = fabs(actual - expected);
+	fp tolerance = LAVAMD_REFERENCE_ABS_TOLERANCE + LAVAMD_REFERENCE_REL_TOLERANCE * fabs(expected);
+
+	if(isfinite(actual) && isfinite(expected) && diff <= tolerance){
+		return 0;
+	}
+
+	fprintf(
+			stderr,
+			"LavaMD CPU reference mismatch at particle %ld component %s: actual=%0.12e expected=%0.12e diff=%0.12e tolerance=%0.12e\n",
+			index,
+			component,
+			actual,
+			expected,
+			diff,
+			tolerance);
+	return 1;
+}
+
+static int verify_lavamd_reference(const FOUR_VECTOR* actual, const FOUR_VECTOR* expected, long count)
+{
+	long mismatches = 0;
+
+	for(long index=0; index<count; index=index+1){
+		mismatches += compare_force_component("v", index, actual[index].v, expected[index].v);
+		mismatches += compare_force_component("x", index, actual[index].x, expected[index].x);
+		mismatches += compare_force_component("y", index, actual[index].y, expected[index].y);
+		mismatches += compare_force_component("z", index, actual[index].z, expected[index].z);
+	}
+
+	if(mismatches != 0){
+		fprintf(stderr, "LavaMD CPU reference verification failed with %ld mismatched component(s)\n", mismatches);
+		rodinia_print_fail("LavaMD CPU reference verification");
+		return EXIT_STATUS_FAILURE;
+	}
+
+	rodinia_print_pass("LavaMD CPU reference verification");
+	return EXIT_STATUS_SUCCESS;
+}
 
 //========================================================================================================================================================================================================200
 //	MAIN FUNCTION
@@ -78,7 +185,9 @@ main(	int argc,
 	FOUR_VECTOR* rv_cpu;
 	fp* qv_cpu;
 	FOUR_VECTOR* fv_cpu;
+	FOUR_VECTOR* fv_reference_cpu;
 	int nh;
+	int verify_cpu = 0;
 
 	time1 = get_time();
 
@@ -94,32 +203,31 @@ main(	int argc,
 		// check if -boxes1d
 		if(strcmp(argv[dim_cpu.cur_arg], "-boxes1d")==0){
 			// check if value provided
-			if(argc>=dim_cpu.cur_arg+1){
+			if(argc>dim_cpu.cur_arg+1){
 				// check if value is a number
 				if(isInteger(argv[dim_cpu.cur_arg+1])==1){
 					dim_cpu.boxes1d_arg = atoi(argv[dim_cpu.cur_arg+1]);
-					if(dim_cpu.boxes1d_arg<0){
-						printf("ERROR: Wrong value to -boxes1d parameter, cannot be <=0\n");
-						return 0;
+					if(dim_cpu.boxes1d_arg<=0){
+						return fail_argument("Wrong value to -boxes1d parameter, cannot be <=0");
 					}
 					dim_cpu.cur_arg = dim_cpu.cur_arg+1;
 				}
 				// value is not a number
 				else{
-					printf("ERROR: Value to -boxes1d parameter in not a number\n");
-					return 0;
+					return fail_argument("Value to -boxes1d parameter in not a number");
 				}
 			}
 			// value not provided
 			else{
-				printf("ERROR: Missing value to -boxes1d parameter\n");
-				return 0;
+				return fail_argument("Missing value to -boxes1d parameter");
 			}
+		}
+		else if(strcmp(argv[dim_cpu.cur_arg], "--verify-cpu")==0){
+			verify_cpu = 1;
 		}
 		// unknown
 		else{
-			printf("ERROR: Unknown parameter\n");
-			return 0;
+			return fail_argument("Unknown parameter");
 		}
 	}
 
@@ -251,6 +359,19 @@ main(	int argc,
 		fv_cpu[i].z = 0;								// set to 0, because kernels keeps adding to initial value
 	}
 
+	fv_reference_cpu = NULL;
+	if(verify_cpu){
+		fv_reference_cpu = (FOUR_VECTOR*)malloc(dim_cpu.space_mem);
+		if(fv_reference_cpu == NULL){
+			fprintf(stderr, "ERROR: Could not allocate LavaMD CPU reference buffer\n");
+			free(rv_cpu);
+			free(qv_cpu);
+			free(fv_cpu);
+			free(box_cpu);
+			return EXIT_STATUS_FAILURE;
+		}
+	}
+
 	time5 = get_time();
 
 	//======================================================================================================================================================150
@@ -270,6 +391,12 @@ main(	int argc,
 
 	time6 = get_time();
 
+	int status = EXIT_STATUS_SUCCESS;
+	if(verify_cpu){
+		compute_lavamd_reference(par_cpu, dim_cpu, box_cpu, rv_cpu, qv_cpu, fv_reference_cpu);
+		status = verify_lavamd_reference(fv_cpu, fv_reference_cpu, dim_cpu.space_elem);
+	}
+
 	//======================================================================================================================================================150
 	//	SYSTEM MEMORY DEALLOCATION
 	//======================================================================================================================================================150
@@ -278,10 +405,16 @@ main(	int argc,
 #ifdef OUTPUT
         FILE *fptr;
 	fptr = fopen("result.txt", "w");	
-	for(i=0; i<dim_cpu.space_elem; i=i+1){
-        	fprintf(fptr, "%f, %f, %f, %f\n", fv_cpu[i].v, fv_cpu[i].x, fv_cpu[i].y, fv_cpu[i].z);
+	if(fptr == NULL){
+		fprintf(stderr, "ERROR: Could not open result.txt for writing\n");
+		status = EXIT_STATUS_FAILURE;
 	}
-	fclose(fptr);
+	else{
+		for(i=0; i<dim_cpu.space_elem; i=i+1){
+			fprintf(fptr, "%f, %f, %f, %f\n", fv_cpu[i].v, fv_cpu[i].x, fv_cpu[i].y, fv_cpu[i].z);
+		}
+		fclose(fptr);
+	}
 #endif       	
 
 
@@ -289,6 +422,7 @@ main(	int argc,
 	free(rv_cpu);
 	free(qv_cpu);
 	free(fv_cpu);
+	free(fv_reference_cpu);
 	free(box_cpu);
 
 	time7 = get_time();
@@ -316,6 +450,6 @@ main(	int argc,
 	//	RETURN
 	//======================================================================================================================================================150
 
-	return 0.0;																					// always returns 0.0
+	return status;
 
 }

@@ -10,12 +10,27 @@
 
 // includes, kernels
 #include "srad_kernel.cu"
+#include "../../../common/rodinia_verify.h"
+
+#define SRAD_V2_ABS_TOLERANCE 1.0e-3f
+#define SRAD_V2_REL_TOLERANCE 1.0e-4f
 
 void random_matrix(float *I, int rows, int cols);
-void runTest( int argc, char** argv);
+int runTest( int argc, char** argv);
+static int verify_cpu_reference(
+	float *actual,
+	const float *initial,
+	int rows,
+	int cols,
+	unsigned int r1,
+	unsigned int r2,
+	unsigned int c1,
+	unsigned int c2,
+	float lambda,
+	int niter);
 void usage(int argc, char **argv)
 {
-	fprintf(stderr, "Usage: %s <rows> <cols> <y1> <y2> <x1> <x2> <lamda> <no. of iter>\n", argv[0]);
+	fprintf(stderr, "Usage: %s <rows> <cols> <y1> <y2> <x1> <x2> <lamda> <no. of iter> [--verify-cpu]\n", argv[0]);
 	fprintf(stderr, "\t<rows>   - number of rows\n");
 	fprintf(stderr, "\t<cols>    - number of cols\n");
 	fprintf(stderr, "\t<y1> 	 - y1 value of the speckle\n");
@@ -24,24 +39,138 @@ void usage(int argc, char **argv)
 	fprintf(stderr, "\t<x2>       - x2 value of the speckle\n");
 	fprintf(stderr, "\t<lamda>   - lambda (0,1)\n");
 	fprintf(stderr, "\t<no. of iter>   - number of iterations\n");
-	
+
 	exit(1);
 }
 ////////////////////////////////////////////////////////////////////////////////
 // Program main
 ////////////////////////////////////////////////////////////////////////////////
 int
-main( int argc, char** argv) 
+main( int argc, char** argv)
 {
   printf("WG size of kernel = %d X %d\n", BLOCK_SIZE, BLOCK_SIZE);
-    runTest( argc, argv);
-
-    return EXIT_SUCCESS;
+    return runTest( argc, argv);
 }
 
+static int verify_cpu_reference(
+	float *actual,
+	const float *initial,
+	int rows,
+	int cols,
+	unsigned int r1,
+	unsigned int r2,
+	unsigned int c1,
+	unsigned int c2,
+	float lambda,
+	int niter)
+{
+	int size = rows * cols;
+	int size_R = (r2 - r1 + 1) * (c2 - c1 + 1);
+	float *expected = (float *)malloc(sizeof(float) * size);
+	float *dN = (float *)malloc(sizeof(float) * size);
+	float *dS = (float *)malloc(sizeof(float) * size);
+	float *dW = (float *)malloc(sizeof(float) * size);
+	float *dE = (float *)malloc(sizeof(float) * size);
+	float *c = (float *)malloc(sizeof(float) * size);
+	int *iN = (int *)malloc(sizeof(int) * rows);
+	int *iS = (int *)malloc(sizeof(int) * rows);
+	int *jW = (int *)malloc(sizeof(int) * cols);
+	int *jE = (int *)malloc(sizeof(int) * cols);
+	if (expected == NULL || dN == NULL || dS == NULL || dW == NULL || dE == NULL ||
+	c == NULL || iN == NULL || iS == NULL || jW == NULL || jE == NULL) {
+	fprintf(stderr, "Cannot allocate SRAD v2 CPU reference buffers\n");
+	free(expected); free(dN); free(dS); free(dW); free(dE); free(c);
+	free(iN); free(iS); free(jW); free(jE);
+	return -1;
+	}
 
-void
-runTest( int argc, char** argv) 
+	memcpy(expected, initial, sizeof(float) * size);
+	for (int i = 0; i < rows; i++) {
+	iN[i] = i - 1;
+	iS[i] = i + 1;
+	}
+	for (int j = 0; j < cols; j++) {
+	jW[j] = j - 1;
+	jE[j] = j + 1;
+	}
+	iN[0] = 0;
+	iS[rows - 1] = rows - 1;
+	jW[0] = 0;
+	jE[cols - 1] = cols - 1;
+
+	for (int iter = 0; iter < niter; iter++) {
+	float sum = 0.0f;
+	float sum2 = 0.0f;
+	for (unsigned int i = r1; i <= r2; i++) {
+	for (unsigned int j = c1; j <= c2; j++) {
+	float tmp = expected[i * cols + j];
+	sum += tmp;
+	sum2 += tmp * tmp;
+	}
+	}
+	float meanROI = sum / size_R;
+	float varROI = (sum2 / size_R) - meanROI * meanROI;
+	float q0sqr = varROI / (meanROI * meanROI);
+
+	for (int i = 0; i < rows; i++) {
+	for (int j = 0; j < cols; j++) {
+	int k = i * cols + j;
+	float Jc = expected[k];
+	dN[k] = expected[iN[i] * cols + j] - Jc;
+	dS[k] = expected[iS[i] * cols + j] - Jc;
+	dW[k] = expected[i * cols + jW[j]] - Jc;
+	dE[k] = expected[i * cols + jE[j]] - Jc;
+	float G2 = (dN[k] * dN[k] + dS[k] * dS[k] + dW[k] * dW[k] + dE[k] * dE[k]) / (Jc * Jc);
+	float L = (dN[k] + dS[k] + dW[k] + dE[k]) / Jc;
+	float num = (0.5f * G2) - ((1.0f / 16.0f) * (L * L));
+	float den = 1.0f + (0.25f * L);
+	float qsqr = num / (den * den);
+	den = (qsqr - q0sqr) / (q0sqr * (1.0f + q0sqr));
+	c[k] = 1.0f / (1.0f + den);
+	if (c[k] < 0.0f) {
+	c[k] = 0.0f;
+	} else if (c[k] > 1.0f) {
+	c[k] = 1.0f;
+	}
+	}
+	}
+	for (int i = 0; i < rows; i++) {
+	for (int j = 0; j < cols; j++) {
+	int k = i * cols + j;
+	float cN = c[k];
+	float cS = c[iS[i] * cols + j];
+	float cW = c[k];
+	float cE = c[i * cols + jE[j]];
+	float D = cN * dN[k] + cS * dS[k] + cW * dW[k] + cE * dE[k];
+	expected[k] = expected[k] + 0.25f * lambda * D;
+	}
+	}
+	}
+
+	for (int i = 0; i < size; i++) {
+	float diff = fabsf(actual[i] - expected[i]);
+	float tolerance = SRAD_V2_ABS_TOLERANCE + SRAD_V2_REL_TOLERANCE * fabsf(expected[i]);
+	if (!isfinite(actual[i]) || !isfinite(expected[i]) || diff > tolerance) {
+	fprintf(stderr,
+	"SRAD v2 CPU reference mismatch at index %d: actual=%g expected=%g diff=%g tolerance=%g\n",
+	i,
+	actual[i],
+	expected[i],
+	diff,
+	tolerance);
+	free(expected); free(dN); free(dS); free(dW); free(dE); free(c);
+	free(iN); free(iS); free(jW); free(jE);
+	return -1;
+	}
+	}
+
+	free(expected); free(dN); free(dS); free(dW); free(dE); free(c);
+	free(iN); free(iS); free(jW); free(jE);
+	return rodinia_print_pass("SRAD v2 CPU reference verification");
+}
+
+int
+runTest( int argc, char** argv)
 {
     int rows, cols, size_I, size_R, niter = 10, iter;
     float *I, *J, lambda, q0sqr, sum, sum2, tmp, meanROI,varROI ;
@@ -54,7 +183,7 @@ runTest( int argc, char** argv)
 #endif
 
 #ifdef GPU
-	
+
 	float *J_cuda;
     float *C_cuda;
 	float *E_C, *W_C, *N_C, *S_C;
@@ -63,24 +192,34 @@ runTest( int argc, char** argv)
 
 	unsigned int r1, r2, c1, c2;
 	float *c;
-    
-	
- 
-	if (argc == 9)
+	float *J_reference;
+	int verify_cpu = 0;
+	int status = EXIT_SUCCESS;
+
+
+
+	if (argc == 9 || argc == 10)
 	{
-		rows = atoi(argv[1]);  //number of rows in the domain
-		cols = atoi(argv[2]);  //number of cols in the domain
-		if ((rows%16!=0) || (cols%16!=0)){
-		fprintf(stderr, "rows and cols must be multiples of 16\n");
-		exit(1);
-		}
-		r1   = atoi(argv[3]);  //y1 position of the speckle
-		r2   = atoi(argv[4]);  //y2 position of the speckle
-		c1   = atoi(argv[5]);  //x1 position of the speckle
-		c2   = atoi(argv[6]);  //x2 position of the speckle
-		lambda = atof(argv[7]); //Lambda value
-		niter = atoi(argv[8]); //number of iterations
-		
+	rows = atoi(argv[1]);  //number of rows in the domain
+	cols = atoi(argv[2]);  //number of cols in the domain
+	if ((rows%16!=0) || (cols%16!=0)){
+	fprintf(stderr, "rows and cols must be multiples of 16\n");
+	exit(1);
+	}
+	r1   = atoi(argv[3]);  //y1 position of the speckle
+	r2   = atoi(argv[4]);  //y2 position of the speckle
+	c1   = atoi(argv[5]);  //x1 position of the speckle
+	c2   = atoi(argv[6]);  //x2 position of the speckle
+	lambda = atof(argv[7]); //Lambda value
+	niter = atoi(argv[8]); //number of iterations
+	if (argc == 10) {
+	if (strcmp(argv[9], "--verify-cpu") != 0) {
+	fprintf(stderr, "Unknown option: %s\n", argv[9]);
+	usage(argc, argv);
+	}
+	verify_cpu = 1;
+	}
+
 	}
     else{
 	usage(argc, argv);
@@ -89,10 +228,11 @@ runTest( int argc, char** argv)
 
 
 	size_I = cols * rows;
-    size_R = (r2-r1+1)*(c2-c1+1);   
+    size_R = (r2-r1+1)*(c2-c1+1);
 
 	I = (float *)malloc( size_I * sizeof(float) );
     J = (float *)malloc( size_I * sizeof(float) );
+	J_reference = (float *)malloc(size_I * sizeof(float));
 	c  = (float *)malloc(sizeof(float)* size_I) ;
 
 
@@ -101,19 +241,19 @@ runTest( int argc, char** argv)
     iN = (int *)malloc(sizeof(unsigned int*) * rows) ;
     iS = (int *)malloc(sizeof(unsigned int*) * rows) ;
     jW = (int *)malloc(sizeof(unsigned int*) * cols) ;
-    jE = (int *)malloc(sizeof(unsigned int*) * cols) ;    
+    jE = (int *)malloc(sizeof(unsigned int*) * cols) ;
 
 
 	dN = (float *)malloc(sizeof(float)* size_I) ;
     dS = (float *)malloc(sizeof(float)* size_I) ;
     dW = (float *)malloc(sizeof(float)* size_I) ;
-    dE = (float *)malloc(sizeof(float)* size_I) ;    
-    
+    dE = (float *)malloc(sizeof(float)* size_I) ;
+
 
     for (int i=0; i< rows; i++) {
         iN[i] = i-1;
         iS[i] = i+1;
-    }    
+    }
     for (int j=0; j< cols; j++) {
         jW[j] = j-1;
         jE[j] = j+1;
@@ -135,19 +275,27 @@ runTest( int argc, char** argv)
 	cudaMalloc((void**)& S_C, sizeof(float)* size_I);
 	cudaMalloc((void**)& N_C, sizeof(float)* size_I);
 
-	
-#endif 
+
+#endif
 
 	printf("Randomizing the input matrix\n");
 	//Generate a random matrix
 	random_matrix(I, rows, cols);
 
     for (int k = 0;  k < size_I; k++ ) {
-     	J[k] = (float)exp(I[k]) ;
+	J[k] = (float)exp(I[k]) ;
     }
+	if (J_reference == NULL) {
+	fprintf(stderr, "Cannot allocate SRAD v2 CPU reference input\n");
+	free(I);
+	free(J);
+	free(c);
+	return EXIT_FAILURE;
+	}
+	memcpy(J_reference, J, sizeof(float) * size_I);
 	printf("Start the SRAD main loop\n");
- for (iter=0; iter< niter; iter++){     
-		sum=0; sum2=0;
+ for (iter=0; iter< niter; iter++){
+	sum=0; sum2=0;
         for (int i=r1; i<=r2; i++) {
             for (int j=c1; j<=c2; j++) {
                 tmp   = J[i * cols + j];
@@ -160,52 +308,52 @@ runTest( int argc, char** argv)
         q0sqr   = varROI / (meanROI*meanROI);
 
 #ifdef CPU
-        
-		for (int i = 0 ; i < rows ; i++) {
-            for (int j = 0; j < cols; j++) { 
-		
-				k = i * cols + j;
-				Jc = J[k];
- 
-				// directional derivates
+
+	for (int i = 0 ; i < rows ; i++) {
+            for (int j = 0; j < cols; j++) {
+
+	k = i * cols + j;
+	Jc = J[k];
+
+	// directional derivates
                 dN[k] = J[iN[i] * cols + j] - Jc;
                 dS[k] = J[iS[i] * cols + j] - Jc;
                 dW[k] = J[i * cols + jW[j]] - Jc;
                 dE[k] = J[i * cols + jE[j]] - Jc;
-			
-                G2 = (dN[k]*dN[k] + dS[k]*dS[k] 
+
+                G2 = (dN[k]*dN[k] + dS[k]*dS[k]
                     + dW[k]*dW[k] + dE[k]*dE[k]) / (Jc*Jc);
 
-   		        L = (dN[k] + dS[k] + dW[k] + dE[k]) / Jc;
+	        L = (dN[k] + dS[k] + dW[k] + dE[k]) / Jc;
 
-				num  = (0.5*G2) - ((1.0/16.0)*(L*L)) ;
+	num  = (0.5*G2) - ((1.0/16.0)*(L*L)) ;
                 den  = 1 + (.25*L);
                 qsqr = num/(den*den);
- 
+
                 // diffusion coefficent (equ 33)
                 den = (qsqr-q0sqr) / (q0sqr * (1+q0sqr)) ;
                 c[k] = 1.0 / (1.0+den) ;
-                
+
                 // saturate diffusion coefficent
                 if (c[k] < 0) {c[k] = 0;}
                 else if (c[k] > 1) {c[k] = 1;}
-		}
+	}
 	}
          for (int i = 0; i < rows; i++) {
-            for (int j = 0; j < cols; j++) {        
+            for (int j = 0; j < cols; j++) {
 
                 // current index
                 k = i * cols + j;
-                
+
                 // diffusion coefficent
-					cN = c[k];
-					cS = c[iS[i] * cols + j];
-					cW = c[k];
-					cE = c[i * cols + jE[j]];
+	cN = c[k];
+	cS = c[iS[i] * cols + j];
+	cW = c[k];
+	cE = c[i * cols + jE[j]];
 
                 // divergence (equ 58)
                 D = cN * dN[k] + cS * dS[k] + cW * dW[k] + cE * dE[k];
-                
+
                 // image update (equ 61)
                 J[k] = J[k] + 0.25*lambda*D;
             }
@@ -222,38 +370,43 @@ runTest( int argc, char** argv)
 
     dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
 	dim3 dimGrid(block_x , block_y);
-    
+
 
 	//Copy data from main memory to device memory
 	cudaMemcpy(J_cuda, J, sizeof(float) * size_I, cudaMemcpyHostToDevice);
 
 	//Run kernels
-	srad_cuda_1<<<dimGrid, dimBlock>>>(E_C, W_C, N_C, S_C, J_cuda, C_cuda, cols, rows, q0sqr); 
-	srad_cuda_2<<<dimGrid, dimBlock>>>(E_C, W_C, N_C, S_C, J_cuda, C_cuda, cols, rows, lambda, q0sqr); 
+	srad_cuda_1<<<dimGrid, dimBlock>>>(E_C, W_C, N_C, S_C, J_cuda, C_cuda, cols, rows, q0sqr);
+	srad_cuda_2<<<dimGrid, dimBlock>>>(E_C, W_C, N_C, S_C, J_cuda, C_cuda, cols, rows, lambda, q0sqr);
 
 	//Copy data from device memory to main memory
     cudaMemcpy(J, J_cuda, sizeof(float) * size_I, cudaMemcpyDeviceToHost);
 
-#endif   
+#endif
 }
 
-    cudaThreadSynchronize();
+    cudaDeviceSynchronize();
+	if (verify_cpu && verify_cpu_reference(J, J_reference, rows, cols, r1, r2, c1, c2, lambda, niter) != 0) {
+	rodinia_print_fail("SRAD v2 CPU reference verification");
+	status = EXIT_FAILURE;
+	}
 
 #ifdef OUTPUT
-    //Printing output	
-		printf("Printing Output:\n"); 
+    //Printing output
+	printf("Printing Output:\n");
     for( int i = 0 ; i < rows ; i++){
-		for ( int j = 0 ; j < cols ; j++){
-         printf("%.5f ", J[i * cols + j]); 
-		}	
-     printf("\n"); 
+	for ( int j = 0 ; j < cols ; j++){
+         printf("%.5f ", J[i * cols + j]);
+	}
+     printf("\n");
    }
-#endif 
+#endif
 
 	printf("Computation Done\n");
 
 	free(I);
 	free(J);
+	free(J_reference);
 #ifdef CPU
 	free(iN); free(iS); free(jW); free(jE);
     free(dN); free(dS); free(dW); free(dE);
@@ -265,20 +418,20 @@ runTest( int argc, char** argv)
 	cudaFree(W_C);
 	cudaFree(N_C);
 	cudaFree(S_C);
-#endif 
+#endif
 	free(c);
-  
+	return status;
 }
 
 
 void random_matrix(float *I, int rows, int cols){
-    
+
 	srand(7);
-	
+
 	for( int i = 0 ; i < rows ; i++){
-		for ( int j = 0 ; j < cols ; j++){
-		 I[i * cols + j] = rand()/(float)RAND_MAX ;
-		}
+	for ( int j = 0 ; j < cols ; j++){
+	 I[i * cols + j] = rand()/(float)RAND_MAX ;
+	}
 	}
 
 }

@@ -1,1 +1,1 @@
-./hybridsort r
+./hybridsort r --verify-cpu

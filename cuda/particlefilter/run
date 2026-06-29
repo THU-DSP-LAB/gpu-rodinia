@@ -1,2 +1,2 @@
-./particlefilter_naive -x 128 -y 128 -z 10 -np 1000
-./particlefilter_float -x 128 -y 128 -z 10 -np 1000
+./particlefilter_naive -x 128 -y 128 -z 10 -np 1000 --verify-cpu
+./particlefilter_float -x 128 -y 128 -z 10 -np 1000 --seed 7 --verify-reference ../../data/particlefilter/cuda_float_128x128x10_np1000_seed7.reference

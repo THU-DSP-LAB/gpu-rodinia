@@ -88,9 +88,9 @@ void write_graphics(	char* filename,
 //====================================================================================================100
 //====================================================================================================100
 
-void read_graphics(	char* filename,
+int read_graphics(	char* filename,
 									fp* input,
-									int data_rows, 
+									int data_rows,
 									int data_cols,
 									int major){
 
@@ -109,8 +109,8 @@ void read_graphics(	char* filename,
 
 	fid = fopen(filename, "r");
 	if( fid == NULL ){
-		printf( "The file was not opened for reading\n" );
-		return;
+		fprintf(stderr, "The file was not opened for reading: %s\n", filename);
+		return -1;
 	}
 
 	//================================================================================80
@@ -151,5 +151,6 @@ void read_graphics(	char* filename,
 	//================================================================================80
 
 	fclose(fid);
+	return 0;
 
 }

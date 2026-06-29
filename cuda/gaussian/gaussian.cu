@@ -18,6 +18,7 @@
 #include "cuda.h"
 #include <string.h>
 #include <math.h>
+#include "../../common/rodinia_verify.h"
 
 #ifdef TIMING
 #include "timing.h"
@@ -62,18 +63,37 @@ float *m;
 
 FILE *fp;
 
-void InitProblemOnce(char *filename);
+#define GAUSSIAN_ABS_TOLERANCE 0.001f
+#define GAUSSIAN_REL_TOLERANCE 0.001f
+#define GAUSSIAN_PIVOT_TOLERANCE 1.0e-20f
+
+typedef struct {
+    int verbose;
+    int verify_cpu;
+} Options;
+
+int InitProblemOnce(const char *filename);
 void InitPerRun();
 void ForwardSub();
 void BackSub();
 __global__ void Fan1(float *m, float *a, int Size, int t);
 __global__ void Fan2(float *m, float *a, float *b,int Size, int j1, int t);
-void InitMat(float *ary, int nrow, int ncol);
-void InitAry(float *ary, int ary_size);
+int InitMat(float *ary, int nrow, int ncol);
+int InitAry(float *ary, int ary_size);
 void PrintMat(float *ary, int nrow, int ncolumn);
 void PrintAry(float *ary, int ary_size);
 void PrintDeviceProperties();
 void checkCUDAError(const char *msg);
+static void usage(const char *program);
+static int initialize_from_args(int argc, char **argv, Options *options);
+static int initialize_generated_problem(int size);
+static int parse_positive_size(const char *text, int *value);
+static float *duplicate_array(const float *source, int count, const char *label);
+static void release_problem_buffers();
+static int run_gaussian(int verbose, int verify_cpu, const float *initial_a, const float *initial_b);
+static int verify_cpu_reference(const float *actual, const float *initial_a, const float *initial_b);
+static int solve_cpu_reference(float *matrix, float *rhs, float *expected);
+static int compare_solution(const float *actual, const float *expected);
 
 unsigned int totalKernelTime = 0;
 
@@ -108,83 +128,187 @@ create_matrix(float *m, int size){
 int main(int argc, char *argv[])
 {
   printf("WG size of kernel 1 = %d, WG size of kernel 2= %d X %d\n", MAXBLOCKSIZE, BLOCK_SIZE_XY, BLOCK_SIZE_XY);
-    int verbose = 0;
-    int i, j;
-    char flag;
     if (argc < 2) {
-        printf("Usage: gaussian -f filename / -s size [-q]\n\n");
-        printf("-q (quiet) suppresses printing the matrix and result values.\n");
-        printf("-f (filename) path of input file\n");
-        printf("-s (size) size of matrix. Create matrix and rhs in this program \n");
-        printf("The first line of the file contains the dimension of the matrix, n.");
-        printf("The second line of the file is a newline.\n");
-        printf("The next n lines contain n tab separated values for the matrix.");
-        printf("The next line of the file is a newline.\n");
-        printf("The next line of the file is a 1xn vector with tab separated values.\n");
-        printf("The next line of the file is a newline. (optional)\n");
-        printf("The final line of the file is the pre-computed solution. (optional)\n");
-        printf("Example: matrix4.txt:\n");
-        printf("4\n");
-        printf("\n");
-        printf("-0.6	-0.5	0.7	0.3\n");
-        printf("-0.3	-0.9	0.3	0.7\n");
-        printf("-0.4	-0.5	-0.3	-0.8\n");	
-        printf("0.0	-0.1	0.2	0.9\n");
-        printf("\n");
-        printf("-0.85	-0.68	0.24	-0.53\n");	
-        printf("\n");
-        printf("0.7	0.0	-0.4	-0.5\n");
-        exit(0);
+        usage(argv[0]);
+        return EXIT_FAILURE;
     }
-    
+
     PrintDeviceProperties();
-    //char filename[100];
-    //sprintf(filename,"matrices/matrix%d.txt",size);
 
-    for(i=1;i<argc;i++) {
-      if (argv[i][0]=='-') {// flag
-        flag = argv[i][1];
-          switch (flag) {
-            case 's': // platform
-              i++;
-              Size = atoi(argv[i]);
-	      printf("Create matrix internally in parse, size = %d \n", Size);
-
-	      a = (float *) malloc(Size * Size * sizeof(float));
-	      create_matrix(a, Size);
-
-	      b = (float *) malloc(Size * sizeof(float));
-	      for (j =0; j< Size; j++)
-	    	b[j]=1.0;
-
-	      m = (float *) malloc(Size * Size * sizeof(float));
-              break;
-            case 'f': // platform
-              i++;
-	      printf("Read file from %s \n", argv[i]);
-	      InitProblemOnce(argv[i]);
-              break;
-            case 'q': // quiet
-	      verbose = 0;
-              break;
-	  }
-      }
+    Options options;
+    if (initialize_from_args(argc, argv, &options) != 0) {
+        usage(argv[0]);
+        release_problem_buffers();
+        return EXIT_FAILURE;
     }
 
-    //InitProblemOnce(filename);
+    float *initial_a = NULL;
+    float *initial_b = NULL;
+    if (options.verify_cpu) {
+        initial_a = duplicate_array(a, Size * Size, "initial matrix");
+        initial_b = duplicate_array(b, Size, "initial rhs");
+        if (initial_a == NULL || initial_b == NULL) {
+            free(initial_a);
+            free(initial_b);
+            release_problem_buffers();
+            return EXIT_FAILURE;
+        }
+    }
+
+    int status = run_gaussian(options.verbose, options.verify_cpu, initial_a, initial_b);
+
+    free(initial_a);
+    free(initial_b);
+    free(finalVec);
+    release_problem_buffers();
+
+#ifdef  TIMING
+	printf("Exec: %f\n", kernel_time);
+#endif
+
+    return status;
+}
+
+static void usage(const char *program)
+{
+    fprintf(stderr, "Usage: %s -f filename / -s size [-q] [--verify-cpu]\n\n", program);
+    fprintf(stderr, "-q (quiet) suppresses printing the matrix and result values.\n");
+    fprintf(stderr, "-f (filename) path of input file\n");
+    fprintf(stderr, "-s (size) size of matrix. Create matrix and rhs in this program\n");
+    fprintf(stderr, "--verify-cpu compares the CUDA solution with a CPU Gaussian reference.\n");
+    fprintf(stderr, "The first line of the file contains the dimension of the matrix, n.\n");
+    fprintf(stderr, "The second line of the file is a newline.\n");
+    fprintf(stderr, "The next n lines contain n tab separated values for the matrix.\n");
+    fprintf(stderr, "The next line of the file is a newline.\n");
+    fprintf(stderr, "The next line of the file is a 1xn vector with tab separated values.\n");
+    fprintf(stderr, "The next line of the file is a newline. (optional)\n");
+    fprintf(stderr, "The final line of the file is the pre-computed solution. (optional)\n");
+}
+
+static int initialize_from_args(int argc, char **argv, Options *options)
+{
+    int input_loaded = 0;
+    options->verbose = 0;
+    options->verify_cpu = 0;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--verify-cpu") == 0) {
+            options->verify_cpu = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "-q") == 0) {
+            options->verbose = 0;
+            continue;
+        }
+        if (strcmp(argv[i], "-s") == 0) {
+            if (input_loaded) {
+                fprintf(stderr, "Only one Gaussian input may be specified\n");
+                return -1;
+            }
+            int parsed_size;
+            if (++i >= argc || parse_positive_size(argv[i], &parsed_size) != 0) {
+                fprintf(stderr, "Invalid Gaussian matrix size\n");
+                return -1;
+            }
+            if (initialize_generated_problem(parsed_size) != 0) {
+                return -1;
+            }
+            input_loaded = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "-f") == 0) {
+            if (input_loaded) {
+                fprintf(stderr, "Only one Gaussian input may be specified\n");
+                return -1;
+            }
+            if (++i >= argc) {
+                fprintf(stderr, "Missing Gaussian input filename\n");
+                return -1;
+            }
+            printf("Read file from %s \n", argv[i]);
+            if (InitProblemOnce(argv[i]) != 0) {
+                return -1;
+            }
+            input_loaded = 1;
+            continue;
+        }
+        fprintf(stderr, "Unknown option: %s\n", argv[i]);
+        return -1;
+    }
+
+    if (!input_loaded) {
+        fprintf(stderr, "Gaussian input must be specified with -f or -s\n");
+        return -1;
+    }
+    return 0;
+}
+
+static int initialize_generated_problem(int size)
+{
+    Size = size;
+    printf("Create matrix internally in parse, size = %d \n", Size);
+
+    a = (float *)malloc(Size * Size * sizeof(float));
+    b = (float *)malloc(Size * sizeof(float));
+    m = (float *)malloc(Size * Size * sizeof(float));
+    if (a == NULL || b == NULL || m == NULL) {
+        fprintf(stderr, "Cannot allocate Gaussian input buffers\n");
+        release_problem_buffers();
+        return -1;
+    }
+
+    create_matrix(a, Size);
+    for (int j = 0; j < Size; j++) {
+        b[j] = 1.0f;
+    }
+    return 0;
+}
+
+static int parse_positive_size(const char *text, int *value)
+{
+    char *end = NULL;
+    long parsed = strtol(text, &end, 10);
+    if (end == text || *end != '\0' || parsed < 2 || parsed > 2147483647L) {
+        return -1;
+    }
+    *value = (int)parsed;
+    return 0;
+}
+
+static float *duplicate_array(const float *source, int count, const char *label)
+{
+    float *copy = (float *)malloc(count * sizeof(float));
+    if (copy == NULL) {
+        fprintf(stderr, "Cannot allocate copy of %s\n", label);
+        return NULL;
+    }
+    memcpy(copy, source, count * sizeof(float));
+    return copy;
+}
+
+static void release_problem_buffers()
+{
+    free(m);
+    free(a);
+    free(b);
+    m = NULL;
+    a = NULL;
+    b = NULL;
+}
+
+static int run_gaussian(int verbose, int verify_cpu, const float *initial_a, const float *initial_b)
+{
     InitPerRun();
-    //begin timing
     struct timeval time_start;
-    gettimeofday(&time_start, NULL);	
-    
-    // run kernels
+    gettimeofday(&time_start, NULL);
+
     ForwardSub();
-    
-    //end timing
+
     struct timeval time_end;
     gettimeofday(&time_end, NULL);
-    unsigned int time_total = (time_end.tv_sec * 1000000 + time_end.tv_usec) - (time_start.tv_sec * 1000000 + time_start.tv_usec);
-    
+    unsigned int time_total = (time_end.tv_sec * 1000000 + time_end.tv_usec) -
+        (time_start.tv_sec * 1000000 + time_start.tv_usec);
+
     if (verbose) {
         printf("Matrix m is: \n");
         PrintMat(m, Size, Size);
@@ -198,21 +322,99 @@ int main(int argc, char *argv[])
     BackSub();
     if (verbose) {
         printf("The final solution is: \n");
-        PrintAry(finalVec,Size);
+        PrintAry(finalVec, Size);
     }
     printf("\nTime total (including memory transfers)\t%f sec\n", time_total * 1e-6);
-    printf("Time for CUDA kernels:\t%f sec\n",totalKernelTime * 1e-6);
-    
-    /*printf("%d,%d\n",size,time_total);
-    fprintf(stderr,"%d,%d\n",size,time_total);*/
-    
-    free(m);
-    free(a);
-    free(b);
+    printf("Time for CUDA kernels:\t%f sec\n", totalKernelTime * 1e-6);
 
-#ifdef  TIMING
-	printf("Exec: %f\n", kernel_time);
-#endif
+    if (verify_cpu) {
+        if (verify_cpu_reference(finalVec, initial_a, initial_b) != 0) {
+            rodinia_print_fail("Gaussian CPU reference verification");
+            return EXIT_FAILURE;
+        }
+        return EXIT_SUCCESS;
+    }
+    return EXIT_SUCCESS;
+}
+
+static int verify_cpu_reference(const float *actual, const float *initial_a, const float *initial_b)
+{
+    float *matrix = duplicate_array(initial_a, Size * Size, "CPU reference matrix");
+    float *rhs = duplicate_array(initial_b, Size, "CPU reference rhs");
+    float *expected = (float *)malloc(Size * sizeof(float));
+    if (matrix == NULL || rhs == NULL || expected == NULL) {
+        fprintf(stderr, "Cannot allocate Gaussian CPU reference buffers\n");
+        free(matrix);
+        free(rhs);
+        free(expected);
+        return -1;
+    }
+
+    int status = solve_cpu_reference(matrix, rhs, expected);
+    if (status == 0) {
+        status = compare_solution(actual, expected);
+    }
+
+    free(matrix);
+    free(rhs);
+    free(expected);
+    if (status != 0) {
+        return -1;
+    }
+    return rodinia_print_pass("Gaussian CPU reference verification");
+}
+
+static int solve_cpu_reference(float *matrix, float *rhs, float *expected)
+{
+    for (int t = 0; t < Size - 1; t++) {
+        float pivot = matrix[Size * t + t];
+        if (fabsf(pivot) <= GAUSSIAN_PIVOT_TOLERANCE) {
+            fprintf(stderr, "Gaussian CPU reference saw near-zero pivot at row %d: %g\n", t, pivot);
+            return -1;
+        }
+        for (int row = t + 1; row < Size; row++) {
+            float multiplier = matrix[Size * row + t] / pivot;
+            matrix[Size * row + t] = 0.0f;
+            for (int col = t + 1; col < Size; col++) {
+                matrix[Size * row + col] -= multiplier * matrix[Size * t + col];
+            }
+            rhs[row] -= multiplier * rhs[t];
+        }
+    }
+
+    for (int offset = 0; offset < Size; offset++) {
+        int row = Size - offset - 1;
+        float sum = rhs[row];
+        for (int col = row + 1; col < Size; col++) {
+            sum -= matrix[Size * row + col] * expected[col];
+        }
+        float pivot = matrix[Size * row + row];
+        if (fabsf(pivot) <= GAUSSIAN_PIVOT_TOLERANCE) {
+            fprintf(stderr, "Gaussian CPU reference saw near-zero pivot at row %d: %g\n", row, pivot);
+            return -1;
+        }
+        expected[row] = sum / pivot;
+    }
+    return 0;
+}
+
+static int compare_solution(const float *actual, const float *expected)
+{
+    for (int index = 0; index < Size; index++) {
+        float diff = fabsf(actual[index] - expected[index]);
+        float tolerance = GAUSSIAN_ABS_TOLERANCE + GAUSSIAN_REL_TOLERANCE * fabsf(expected[index]);
+        if (!isfinite(actual[index]) || diff > tolerance) {
+            fprintf(stderr,
+                "Gaussian CPU reference mismatch at index %d: actual=%g expected=%g diff=%g tolerance=%g\n",
+                index,
+                actual[index],
+                expected[index],
+                diff,
+                tolerance);
+            return -1;
+        }
+    }
+    return 0;
 }
 /*------------------------------------------------------
  ** PrintDeviceProperties
@@ -258,7 +460,7 @@ void PrintDeviceProperties(){
  ** the memory storages.
  **------------------------------------------------------
  */
-void InitProblemOnce(char *filename)
+int InitProblemOnce(const char *filename)
 {
 	//char *filename = argv[1];
 	
@@ -267,21 +469,49 @@ void InitProblemOnce(char *filename)
 	//printf("The file name is: %s\n", filename);
 	
 	fp = fopen(filename, "r");
+	if (fp == NULL) {
+		fprintf(stderr, "Cannot open Gaussian input file: %s\n", filename);
+		return -1;
+	}
 	
-	fscanf(fp, "%d", &Size);	
+	if (fscanf(fp, "%d", &Size) != 1 || Size < 2) {
+		fprintf(stderr, "Invalid Gaussian matrix size in input file: %s\n", filename);
+		fclose(fp);
+		fp = NULL;
+		return -1;
+	}
 	 
 	a = (float *) malloc(Size * Size * sizeof(float));
-	 
-	InitMat(a, Size, Size);
+	b = (float *) malloc(Size * sizeof(float));
+	m = (float *) malloc(Size * Size * sizeof(float));
+	if (a == NULL || b == NULL || m == NULL) {
+		fprintf(stderr, "Cannot allocate Gaussian input buffers\n");
+		fclose(fp);
+		fp = NULL;
+		release_problem_buffers();
+		return -1;
+	}
+
+	if (InitMat(a, Size, Size) != 0) {
+		fclose(fp);
+		fp = NULL;
+		release_problem_buffers();
+		return -1;
+	}
 	//printf("The input matrix a is:\n");
 	//PrintMat(a, Size, Size);
-	b = (float *) malloc(Size * sizeof(float));
-	
-	InitAry(b, Size);
+	if (InitAry(b, Size) != 0) {
+		fclose(fp);
+		fp = NULL;
+		release_problem_buffers();
+		return -1;
+	}
 	//printf("The input array b is:\n");
 	//PrintAry(b, Size);
-		
-	 m = (float *) malloc(Size * Size * sizeof(float));
+
+	fclose(fp);
+	fp = NULL;
+	return 0;
 }
 
 /*------------------------------------------------------
@@ -430,15 +660,19 @@ void BackSub()
 	}
 }
 
-void InitMat(float *ary, int nrow, int ncol)
+int InitMat(float *ary, int nrow, int ncol)
 {
 	int i, j;
 	
 	for (i=0; i<nrow; i++) {
 		for (j=0; j<ncol; j++) {
-			fscanf(fp, "%f",  ary+Size*i+j);
+			if (fscanf(fp, "%f", ary+Size*i+j) != 1) {
+				fprintf(stderr, "Invalid Gaussian matrix value at row %d column %d\n", i, j);
+				return -1;
+			}
 		}
 	}  
+	return 0;
 }
 
 /*------------------------------------------------------
@@ -463,13 +697,17 @@ void PrintMat(float *ary, int nrow, int ncol)
  ** data from the data file
  **------------------------------------------------------
  */
-void InitAry(float *ary, int ary_size)
+int InitAry(float *ary, int ary_size)
 {
 	int i;
 	
 	for (i=0; i<ary_size; i++) {
-		fscanf(fp, "%f",  &ary[i]);
+		if (fscanf(fp, "%f", &ary[i]) != 1) {
+			fprintf(stderr, "Invalid Gaussian vector value at index %d\n", i);
+			return -1;
+		}
 	}
+	return 0;
 }  
 
 /*------------------------------------------------------
@@ -494,4 +732,3 @@ void checkCUDAError(const char *msg)
         exit(EXIT_FAILURE);
     }                         
 }
-

@@ -7,11 +7,210 @@
 #include <fcntl.h>
 #include <float.h>
 #include <sys/time.h>
+#include <time.h>
+#include "../../common/rodinia_verify.h"
 #define BLOCK_X 16
 #define BLOCK_Y 16
 #define PI 3.1415926535897932
 
 const int threads_per_block = 512;
+
+#define PARTICLEFILTER_FLOAT_REFERENCE_MAGIC "GPIDL_RODINIA_PARTICLEFILTER_FLOAT_REFERENCE"
+#define PARTICLEFILTER_FLOAT_REFERENCE_VERSION 1
+#define PARTICLEFILTER_FLOAT_ABS_TOLERANCE 1.0e-6
+#define PARTICLEFILTER_FLOAT_REL_TOLERANCE 1.0e-6
+
+typedef struct {
+    int seed_base;
+    int seed_set;
+    const char *save_reference_path;
+    const char *verify_reference_path;
+} ParticlefilterFloatOptions;
+
+typedef struct {
+    int dim_x;
+    int dim_y;
+    int frames;
+    int particles;
+    int seed_base;
+    double xe;
+    double ye;
+    double distance;
+} ParticlefilterFloatReference;
+
+static int parse_int_argument(const char *text, const char *name, int *value) {
+    char *end = NULL;
+    long parsed = strtol(text, &end, 10);
+    if (end == text || *end != '\0' || parsed < INT_MIN || parsed > INT_MAX) {
+        fprintf(stderr, "Invalid %s: %s\n", name, text);
+        return -1;
+    }
+    *value = (int)parsed;
+    return 0;
+}
+
+static int parse_reference_options(int argc, char **argv, ParticlefilterFloatOptions *options) {
+    options->seed_base = 0;
+    options->seed_set = 0;
+    options->save_reference_path = NULL;
+    options->verify_reference_path = NULL;
+
+    for (int arg = 9; arg < argc; arg++) {
+        if (strcmp(argv[arg], "--seed") == 0) {
+            if (++arg >= argc || parse_int_argument(argv[arg], "seed", &options->seed_base) != 0) {
+                return -1;
+            }
+            options->seed_set = 1;
+            continue;
+        }
+        if (strcmp(argv[arg], "--save-reference") == 0) {
+            if (++arg >= argc) {
+                fprintf(stderr, "Missing path after --save-reference\n");
+                return -1;
+            }
+            if (options->verify_reference_path != NULL) {
+                fprintf(stderr, "Only one particlefilter_float reference mode may be specified\n");
+                return -1;
+            }
+            options->save_reference_path = argv[arg];
+            continue;
+        }
+        if (strcmp(argv[arg], "--verify-reference") == 0) {
+            if (++arg >= argc) {
+                fprintf(stderr, "Missing path after --verify-reference\n");
+                return -1;
+            }
+            if (options->save_reference_path != NULL) {
+                fprintf(stderr, "Only one particlefilter_float reference mode may be specified\n");
+                return -1;
+            }
+            options->verify_reference_path = argv[arg];
+            continue;
+        }
+        fprintf(stderr, "Unknown option: %s\n", argv[arg]);
+        return -1;
+    }
+
+    if ((options->save_reference_path != NULL || options->verify_reference_path != NULL) &&
+        !options->seed_set) {
+        fprintf(stderr, "particlefilter_float reference modes require --seed for reproducible input\n");
+        return -1;
+    }
+    return 0;
+}
+
+static int save_reference(const char *path, const ParticlefilterFloatReference *reference) {
+    FILE *file = fopen(path, "w");
+    if (file == NULL) {
+        fprintf(stderr, "Cannot open particlefilter_float reference for write: %s\n", path);
+        return -1;
+    }
+    fprintf(file, "%s %d\n", PARTICLEFILTER_FLOAT_REFERENCE_MAGIC, PARTICLEFILTER_FLOAT_REFERENCE_VERSION);
+    fprintf(file, "dim_x %d\n", reference->dim_x);
+    fprintf(file, "dim_y %d\n", reference->dim_y);
+    fprintf(file, "frames %d\n", reference->frames);
+    fprintf(file, "particles %d\n", reference->particles);
+    fprintf(file, "seed_base %d\n", reference->seed_base);
+    fprintf(file, "xe %.17g\n", reference->xe);
+    fprintf(file, "ye %.17g\n", reference->ye);
+    fprintf(file, "distance %.17g\n", reference->distance);
+    if (fclose(file) != 0) {
+        fprintf(stderr, "Failed closing particlefilter_float reference: %s\n", path);
+        return -1;
+    }
+    printf("Saved particlefilter_float reference to '%s'\n", path);
+    return 0;
+}
+
+static int scan_reference(FILE *file, const char *label, const char *format, void *value) {
+    char actual_label[64];
+    if (fscanf(file, "%63s", actual_label) != 1 || strcmp(actual_label, label) != 0 ||
+        fscanf(file, format, value) != 1) {
+        fprintf(stderr, "Invalid particlefilter_float reference field: %s\n", label);
+        return -1;
+    }
+    return 0;
+}
+
+static int read_reference(const char *path, ParticlefilterFloatReference *reference) {
+    FILE *file = fopen(path, "r");
+    if (file == NULL) {
+        fprintf(stderr, "Cannot open particlefilter_float reference for read: %s\n", path);
+        return -1;
+    }
+    char magic[128];
+    int version = 0;
+    if (fscanf(file, "%127s %d", magic, &version) != 2 ||
+        strcmp(magic, PARTICLEFILTER_FLOAT_REFERENCE_MAGIC) != 0 ||
+        version != PARTICLEFILTER_FLOAT_REFERENCE_VERSION) {
+        fprintf(stderr, "Invalid particlefilter_float reference header: %s\n", path);
+        fclose(file);
+        return -1;
+    }
+    int failed = 0;
+    failed |= scan_reference(file, "dim_x", "%d", &reference->dim_x);
+    failed |= scan_reference(file, "dim_y", "%d", &reference->dim_y);
+    failed |= scan_reference(file, "frames", "%d", &reference->frames);
+    failed |= scan_reference(file, "particles", "%d", &reference->particles);
+    failed |= scan_reference(file, "seed_base", "%d", &reference->seed_base);
+    failed |= scan_reference(file, "xe", "%lf", &reference->xe);
+    failed |= scan_reference(file, "ye", "%lf", &reference->ye);
+    failed |= scan_reference(file, "distance", "%lf", &reference->distance);
+    fclose(file);
+    return failed == 0 ? 0 : -1;
+}
+
+static int compare_double_field(const char *field, double actual, double expected) {
+    double diff = fabs(actual - expected);
+    double tolerance = PARTICLEFILTER_FLOAT_ABS_TOLERANCE +
+        PARTICLEFILTER_FLOAT_REL_TOLERANCE * fabs(expected);
+    if (isfinite(actual) && isfinite(expected) && diff <= tolerance) {
+        return 0;
+    }
+    fprintf(stderr,
+            "particlefilter_float reference mismatch for %s: actual=%.17g expected=%.17g diff=%.17g tolerance=%.17g\n",
+            field,
+            actual,
+            expected,
+            diff,
+            tolerance);
+    return -1;
+}
+
+static int verify_reference(const char *path, const ParticlefilterFloatReference *actual) {
+    ParticlefilterFloatReference expected;
+    if (read_reference(path, &expected) != 0) {
+        rodinia_print_fail("Particlefilter float reference verification");
+        return -1;
+    }
+    int failed = 0;
+    if (actual->dim_x != expected.dim_x || actual->dim_y != expected.dim_y ||
+        actual->frames != expected.frames || actual->particles != expected.particles ||
+        actual->seed_base != expected.seed_base) {
+        fprintf(stderr,
+                "particlefilter_float reference task mismatch: actual=%dx%dx%d np=%d seed=%d expected=%dx%dx%d np=%d seed=%d\n",
+                actual->dim_x,
+                actual->dim_y,
+                actual->frames,
+                actual->particles,
+                actual->seed_base,
+                expected.dim_x,
+                expected.dim_y,
+                expected.frames,
+                expected.particles,
+                expected.seed_base);
+        failed = -1;
+    }
+    failed |= compare_double_field("xe", actual->xe, expected.xe);
+    failed |= compare_double_field("ye", actual->ye, expected.ye);
+    failed |= compare_double_field("distance", actual->distance, expected.distance);
+    if (failed != 0) {
+        rodinia_print_fail("Particlefilter float reference verification");
+        return -1;
+    }
+    rodinia_print_pass("Particlefilter float reference verification");
+    return 0;
+}
 
 /**
 @var M value for Linear Congruential Generator (LCG); use GCC's value
@@ -633,7 +832,14 @@ int findIndex(double * CDF, int lengthCDF, double value) {
  * @param seed The seed array used for random number generation
  * @param Nparticles The number of particles to be used
  */
-void particleFilter(unsigned char * I, int IszX, int IszY, int Nfr, int * seed, int Nparticles) {
+void particleFilter(
+        unsigned char * I,
+        int IszX,
+        int IszY,
+        int Nfr,
+        int * seed,
+        int Nparticles,
+        ParticlefilterFloatReference *reference) {
     int max_size = IszX * IszY*Nfr;
     //original particle centroid
     double xe = roundDouble(IszY / 2.0);
@@ -742,7 +948,7 @@ void particleFilter(unsigned char * I, int IszX, int IszY, int Nfr, int * seed, 
     }//end loop
 
     //block till kernels are finished
-    cudaThreadSynchronize();
+    cudaDeviceSynchronize();
     long long back_time = get_time();
 
     cudaFree(xj_GPU);
@@ -781,6 +987,13 @@ void particleFilter(unsigned char * I, int IszX, int IszY, int Nfr, int * seed, 
     printf("YE: %lf\n", ye);
     double distance = sqrt(pow((double) (xe - (int) roundDouble(IszY / 2.0)), 2) + pow((double) (ye - (int) roundDouble(IszX / 2.0)), 2));
     printf("%lf\n", distance);
+    reference->dim_x = IszX;
+    reference->dim_y = IszY;
+    reference->frames = Nfr;
+    reference->particles = Nparticles;
+    reference->xe = xe;
+    reference->ye = ye;
+    reference->distance = distance;
 
     //CUDA freeing of memory
     cudaFree(weights_GPU);
@@ -800,16 +1013,21 @@ void particleFilter(unsigned char * I, int IszX, int IszY, int Nfr, int * seed, 
 
 int main(int argc, char * argv[]) {
 
-    char* usage = "double.out -x <dimX> -y <dimY> -z <Nfr> -np <Nparticles>";
+    char* usage = "double.out -x <dimX> -y <dimY> -z <Nfr> -np <Nparticles> [--seed <int>] [--save-reference <path>|--verify-reference <path>]";
     //check number of arguments
-    if (argc != 9) {
+    if (argc < 9) {
         printf("%s\n", usage);
-        return 0;
+        return EXIT_FAILURE;
+    }
+    ParticlefilterFloatOptions options;
+    if (parse_reference_options(argc, argv, &options) != 0) {
+        printf("%s\n", usage);
+        return EXIT_FAILURE;
     }
     //check args deliminators
     if (strcmp(argv[1], "-x") || strcmp(argv[3], "-y") || strcmp(argv[5], "-z") || strcmp(argv[7], "-np")) {
         printf("%s\n", usage);
-        return 0;
+        return EXIT_FAILURE;
     }
 
     int IszX, IszY, Nfr, Nparticles;
@@ -817,51 +1035,52 @@ int main(int argc, char * argv[]) {
     //converting a string to a integer
     if (sscanf(argv[2], "%d", &IszX) == EOF) {
         printf("ERROR: dimX input is incorrect");
-        return 0;
+        return EXIT_FAILURE;
     }
 
     if (IszX <= 0) {
         printf("dimX must be > 0\n");
-        return 0;
+        return EXIT_FAILURE;
     }
 
     //converting a string to a integer
     if (sscanf(argv[4], "%d", &IszY) == EOF) {
         printf("ERROR: dimY input is incorrect");
-        return 0;
+        return EXIT_FAILURE;
     }
 
     if (IszY <= 0) {
         printf("dimY must be > 0\n");
-        return 0;
+        return EXIT_FAILURE;
     }
 
     //converting a string to a integer
     if (sscanf(argv[6], "%d", &Nfr) == EOF) {
         printf("ERROR: Number of frames input is incorrect");
-        return 0;
+        return EXIT_FAILURE;
     }
 
     if (Nfr <= 0) {
         printf("number of frames must be > 0\n");
-        return 0;
+        return EXIT_FAILURE;
     }
 
     //converting a string to a integer
     if (sscanf(argv[8], "%d", &Nparticles) == EOF) {
         printf("ERROR: Number of particles input is incorrect");
-        return 0;
+        return EXIT_FAILURE;
     }
 
     if (Nparticles <= 0) {
         printf("Number of particles must be > 0\n");
-        return 0;
+        return EXIT_FAILURE;
     }
     //establish seed
     int * seed = (int *) malloc(sizeof (int) *Nparticles);
     int i;
+    int seed_base = options.seed_set ? options.seed_base : (int)time(0);
     for (i = 0; i < Nparticles; i++)
-        seed[i] = time(0) * i;
+        seed[i] = seed_base * i;
     //malloc matrix
     unsigned char * I = (unsigned char *) malloc(sizeof (unsigned char) *IszX * IszY * Nfr);
     long long start = get_time();
@@ -870,12 +1089,24 @@ int main(int argc, char * argv[]) {
     long long endVideoSequence = get_time();
     printf("VIDEO SEQUENCE TOOK %f\n", elapsed_time(start, endVideoSequence));
     //call particle filter
-    particleFilter(I, IszX, IszY, Nfr, seed, Nparticles);
+    ParticlefilterFloatReference reference;
+    memset(&reference, 0, sizeof(reference));
+    reference.seed_base = seed_base;
+    particleFilter(I, IszX, IszY, Nfr, seed, Nparticles, &reference);
+    int status = EXIT_SUCCESS;
+    if (options.save_reference_path != NULL &&
+        save_reference(options.save_reference_path, &reference) != 0) {
+        status = EXIT_FAILURE;
+    }
+    if (status == EXIT_SUCCESS && options.verify_reference_path != NULL &&
+        verify_reference(options.verify_reference_path, &reference) != 0) {
+        status = EXIT_FAILURE;
+    }
     long long endParticleFilter = get_time();
     printf("PARTICLE FILTER TOOK %f\n", elapsed_time(endVideoSequence, endParticleFilter));
     printf("ENTIRE PROGRAM TOOK %f\n", elapsed_time(start, endParticleFilter));
 
     free(seed);
     free(I);
-    return 0;
+    return status;
 }

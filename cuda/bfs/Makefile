@@ -9,20 +9,20 @@ SRC = bfs.cu
 EXE = bfs.out
 
 release: $(SRC)
-	$(CC) $(SRC) -o $(EXE) -I$(INCLUDE) -I../util -L$(CUDA_LIB_DIR) -DTIMING
+	$(CC) $(CUDA_CUDART_FLAGS) $(CUDA_GENCODE_FLAGS) $(SRC) -o $(EXE) -I$(INCLUDE) -I../util -L$(CUDA_LIB_DIR) -DTIMING
 
 clang: $(SRC)
-	clang++ $(SRC) -o $(EXE) -I../util --cuda-gpu-arch=sm_20 \
-		-L/usr/local/cuda/lib64 -lcudart_static -ldl -lrt -pthread -DTIMING
+	clang++ $(SRC) -o $(EXE) -I../util --cuda-gpu-arch=$(CUDA_CLANG_ARCH) \
+		-L$(CUDA_LIB_DIR) -lcudart -DTIMING
 
 enum: $(SRC)
-	$(CC) -deviceemu $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR) 
+	$(CC) -deviceemu $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR)
 
 debug: $(SRC)
-	$(CC) -g $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR) 
+	$(CC) $(CUDA_CUDART_FLAGS) $(CUDA_GENCODE_FLAGS) -g $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR)
 
 debugenum: $(SRC)
-	$(CC) -g -deviceemu $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR) 
+	$(CC) -g -deviceemu $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR)
 
 clean: $(SRC)
 	rm -f $(EXE) $(EXE).linkinfo result.txt

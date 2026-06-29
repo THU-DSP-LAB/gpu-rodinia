@@ -34,10 +34,13 @@
 #include <assert.h>
 #include <sys/time.h>
 #include <getopt.h>
+#include <vector>
 
 #include "common.h"
 #include "components.h"
 #include "dwt.h"
+#include "dwt_reference.h"
+#include "../../common/rodinia_verify.h"
 
 struct dwt {
     char * srcFilename;
@@ -48,6 +51,201 @@ struct dwt {
     int components;
     int dwtLvls;
 };
+
+static int divRndUpInt(int value, int divisor)
+{
+    return (value / divisor) + ((value % divisor) ? 1 : 0);
+}
+
+static int mirrorIndex(int index, int size)
+{
+    if (index >= size) {
+        return 2 * size - 2 - index;
+    }
+    if (index < 0) {
+        return -index;
+    }
+    return index;
+}
+
+static unsigned char sampleToChar(int sample)
+{
+    int value = sample + 128;
+    if (value > 255) {
+        return 255;
+    }
+    if (value < 0) {
+        return 0;
+    }
+    return (unsigned char)value;
+}
+
+static void cpuDwt53Line(const std::vector<int>& input, std::vector<int>& output)
+{
+    std::vector<int> transformed = input;
+    int count = (int)transformed.size();
+
+    for (int index = 1; index < count; index += 2) {
+        int previous = transformed[mirrorIndex(index - 1, count)];
+        int next = transformed[mirrorIndex(index + 1, count)];
+        transformed[index] -= (previous + next) / 2;
+    }
+
+    for (int index = 0; index < count; index += 2) {
+        int previous = transformed[mirrorIndex(index - 1, count)];
+        int next = transformed[mirrorIndex(index + 1, count)];
+        transformed[index] += (previous + next + 2) / 4;
+    }
+
+    output.clear();
+    output.reserve(count);
+    for (int index = 0; index < count; index += 2) {
+        output.push_back(transformed[index]);
+    }
+    for (int index = 1; index < count; index += 2) {
+        output.push_back(transformed[index]);
+    }
+}
+
+static void cpuForwardDwt53Level(
+    const std::vector<int>& input,
+    int width,
+    int height,
+    std::vector<int>& output)
+{
+    std::vector<int> vertical(width * height);
+    std::vector<int> column(height);
+    std::vector<int> transformedColumn;
+    for (int x = 0; x < width; x++) {
+        for (int y = 0; y < height; y++) {
+            column[y] = input[y * width + x];
+        }
+        cpuDwt53Line(column, transformedColumn);
+        for (int y = 0; y < height; y++) {
+            vertical[y * width + x] = transformedColumn[y];
+        }
+    }
+
+    std::vector<int> transformed(width * height);
+    std::vector<int> row(width);
+    std::vector<int> transformedRow;
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            row[x] = vertical[y * width + x];
+        }
+        cpuDwt53Line(row, transformedRow);
+        for (int x = 0; x < width; x++) {
+            transformed[y * width + x] = transformedRow[x];
+        }
+    }
+
+    int lowWidth = divRndUpInt(width, 2);
+    int highWidth = width / 2;
+    int lowHeight = divRndUpInt(height, 2);
+    int highHeight = height / 2;
+    output.assign(width * height, 0);
+
+    for (int y = 0; y < lowHeight; y++) {
+        for (int x = 0; x < lowWidth; x++) {
+            output[y * lowWidth + x] = transformed[y * width + x];
+        }
+    }
+
+    int offset = lowWidth * lowHeight;
+    for (int y = 0; y < lowHeight; y++) {
+        for (int x = 0; x < highWidth; x++) {
+            output[offset + y * highWidth + x] = transformed[y * width + lowWidth + x];
+        }
+    }
+
+    offset += highWidth * lowHeight;
+    for (int y = 0; y < highHeight; y++) {
+        for (int x = 0; x < lowWidth; x++) {
+            output[offset + y * lowWidth + x] = transformed[(lowHeight + y) * width + x];
+        }
+    }
+
+    offset += lowWidth * highHeight;
+    for (int y = 0; y < highHeight; y++) {
+        for (int x = 0; x < highWidth; x++) {
+            output[offset + y * highWidth + x] =
+                transformed[(lowHeight + y) * width + lowWidth + x];
+        }
+    }
+}
+
+static std::vector<int> cpuForwardDwt53Reference(const struct dwt *d)
+{
+    int width = d->pixWidth;
+    int height = d->pixHeight;
+    std::vector<int> current(width * height);
+    for (int index = 0; index < width * height; index++) {
+        current[index] = (int)d->srcImg[index] - 128;
+    }
+
+    std::vector<int> reference(width * height, 0);
+    for (int level = 0; level < d->dwtLvls; level++) {
+        std::vector<int> levelOutput;
+        cpuForwardDwt53Level(current, width, height, levelOutput);
+        for (int index = 0; index < width * height; index++) {
+            reference[index] = levelOutput[index];
+        }
+
+        int nextWidth = divRndUpInt(width, 2);
+        int nextHeight = divRndUpInt(height, 2);
+        if (level + 1 == d->dwtLvls) {
+            break;
+        }
+        current.assign(levelOutput.begin(), levelOutput.begin() + nextWidth * nextHeight);
+        width = nextWidth;
+        height = nextHeight;
+    }
+    return reference;
+}
+
+template <typename T>
+int verifyDWTCPUReference(T *component_cuda, const struct dwt *d, int forward)
+{
+    (void)component_cuda;
+    (void)d;
+    (void)forward;
+    fprintf(stderr, "DWT2D CPU verification currently supports forward 5/3 integer data only\n");
+    return -1;
+}
+
+template <>
+int verifyDWTCPUReference<int>(int *component_cuda, const struct dwt *d, int forward)
+{
+    if (!forward) {
+        fprintf(stderr, "DWT2D CPU verification currently supports forward transforms only\n");
+        return -1;
+    }
+    if (d->components != 1) {
+        fprintf(stderr, "DWT2D CPU verification currently supports one component only\n");
+        return -1;
+    }
+
+    int samples = d->pixWidth * d->pixHeight;
+    std::vector<int> actual(samples);
+    cudaMemcpy(actual.data(), component_cuda, samples * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaCheckError("Copy DWT2D verification output to host");
+
+    std::vector<int> expected = cpuForwardDwt53Reference(d);
+    for (int index = 0; index < samples; index++) {
+        if (actual[index] != expected[index]) {
+            fprintf(stderr,
+                    "DWT2D CPU reference mismatch at sample %d: actual=%d expected=%d actual_byte=%u expected_byte=%u\n",
+                    index,
+                    actual[index],
+                    expected[index],
+                    sampleToChar(actual[index]),
+                    sampleToChar(expected[index]));
+            return -1;
+        }
+    }
+
+    return rodinia_print_pass("DWT2D CPU reference verification");
+}
 
 int getImg(char * srcFilename, unsigned char *srcImg, int inputSize)
 {
@@ -90,13 +288,22 @@ void usage() {
   -r, --reverse\t\t\treverse transform\n\
   -9, --97\t\t\t9/7 transform\n\
   -5, --53\t\t\t5/3 transform\n\
-  -w  --write-visual\t\twrite output in visual (tiled) fashion instead of the linear\n");
+  -w  --write-visual\t\twrite output in visual (tiled) fashion instead of the linear\n\
+      --verify-cpu\t\tcompare output coefficients with CPU reference\n\
+      --save-reference <file>\tsave output summary reference\n\
+      --verify-reference <file>\tverify output summary reference\n");
 }
 
 template <typename T>
-void processDWT(struct dwt *d, int forward, int writeVisual)
+int processDWT(
+    struct dwt *d,
+    int forward,
+    int writeVisual,
+    int verifyCpu,
+    Dwt2DReferenceContext *referenceContext)
 {
     int componentSize = d->pixWidth*d->pixHeight*sizeof(T);
+    int status = 0;
     
     T *c_r_out, *backup ;
     cudaMalloc((void**)&c_r_out, componentSize); //< aligned component size
@@ -147,6 +354,14 @@ void processDWT(struct dwt *d, int forward, int writeVisual)
         nStage2dDWT(c_r, c_r_out, backup, d->pixWidth, d->pixHeight, d->dwtLvls, forward);
         nStage2dDWT(c_g, c_g_out, backup, d->pixWidth, d->pixHeight, d->dwtLvls, forward);
         nStage2dDWT(c_b, c_b_out, backup, d->pixWidth, d->pixHeight, d->dwtLvls, forward);
+        status |= dwt2d_record_component_hash(referenceContext, 0, c_r_out, d->pixWidth * d->pixHeight);
+        status |= dwt2d_record_component_hash(referenceContext, 1, c_g_out, d->pixWidth * d->pixHeight);
+        status |= dwt2d_record_component_hash(referenceContext, 2, c_b_out, d->pixWidth * d->pixHeight);
+        if (verifyCpu) {
+            fprintf(stderr, "DWT2D CPU verification currently supports one component only\n");
+            rodinia_print_fail("DWT2D CPU reference verification");
+            status = 1;
+        }
      
         // -------test----------
         // T *h_r_out=(T*)malloc(componentSize);
@@ -197,6 +412,7 @@ void processDWT(struct dwt *d, int forward, int writeVisual)
 
         // Compute DWT 
         nStage2dDWT(c_r, c_r_out, backup, d->pixWidth, d->pixHeight, d->dwtLvls, forward);
+        status |= dwt2d_record_component_hash(referenceContext, 0, c_r_out, d->pixWidth * d->pixHeight);
 
         // Store DWT to file 
 // #ifdef OUTPUT        
@@ -206,6 +422,10 @@ void processDWT(struct dwt *d, int forward, int writeVisual)
             writeLinear(c_r_out, d->pixWidth, d->pixHeight, d->outFilename, ".lin.out");
         }
 // #endif
+        if (verifyCpu && verifyDWTCPUReference<T>(c_r_out, d, forward) != 0) {
+            rodinia_print_fail("DWT2D CPU reference verification");
+            status = 1;
+        }
         cudaFree(c_r);
         cudaCheckError("Cuda free");
     }
@@ -214,12 +434,13 @@ void processDWT(struct dwt *d, int forward, int writeVisual)
     cudaCheckError("Cuda free device");
     cudaFree(backup);
     cudaCheckError("Cuda free device");
+    return status;
 }
 
 int main(int argc, char **argv) 
 {
     int optindex = 0;
-    char ch;
+    int ch;
     struct option longopts[] = {
         {"dimension",   required_argument, 0, 'd'}, //dimensions of src img
         {"components",  required_argument, 0, 'c'}, //numger of components of src img
@@ -231,7 +452,11 @@ int main(int argc, char **argv)
         {"97",          no_argument,       0, '9'}, //9/7 transform
         {"53",          no_argument,       0, '5' }, //5/3transform
         {"write-visual",no_argument,       0, 'w' }, //write output (subbands) in visual (tiled) order instead of linear
-        {"help",        no_argument,       0, 'h'}  
+        {"verify-cpu",  no_argument,       0, 'V' }, //verify output coefficients against CPU reference
+        {"save-reference", required_argument, 0, 1000},
+        {"verify-reference", required_argument, 0, 1001},
+        {"help",        no_argument,       0, 'h'},
+        {0,             0,                 0,  0 }
     };
     
     int pixWidth    = 0; //<real pixWidth
@@ -243,9 +468,12 @@ int main(int argc, char **argv)
     int forward     = 1; //forward transform
     int dwt97       = 1; //1=dwt9/7, 0=dwt5/3 transform
     int writeVisual = 0; //write output (subbands) in visual (tiled) order instead of linear
+    int verifyCpu   = 0;
+    const char *saveReferencePath = NULL;
+    const char *verifyReferencePath = NULL;
     char * pos;
 
-    while ((ch = getopt_long(argc, argv, "d:c:b:l:D:fr95wh", longopts, &optindex)) != -1) {
+    while ((ch = getopt_long(argc, argv, "d:c:b:l:D:fr95whV", longopts, &optindex)) != -1) {
         switch (ch) {
         case 'd':
             pixWidth = atoi(optarg);
@@ -282,6 +510,23 @@ int main(int argc, char **argv)
             break;
         case 'w':
             writeVisual = 1;
+            break;
+        case 'V':
+            verifyCpu = 1;
+            break;
+        case 1000:
+            if (verifyReferencePath != NULL) {
+                fprintf(stderr, "Only one DWT2D reference mode may be specified\n");
+                return -1;
+            }
+            saveReferencePath = optarg;
+            break;
+        case 1001:
+            if (saveReferencePath != NULL) {
+                fprintf(stderr, "Only one DWT2D reference mode may be specified\n");
+                return -1;
+            }
+            verifyReferencePath = optarg;
             break;
         case 'h':
             usage();
@@ -348,7 +593,7 @@ int main(int argc, char **argv)
     d->srcFilename = (char *)malloc(strlen(argv[0]) + 1);
     strcpy(d->srcFilename, argv[0]);
     if (argc == 1) { // only one filename supplyed
-        d->outFilename = (char *)malloc(strlen(d->srcFilename)+4);
+        d->outFilename = (char *)malloc(strlen(d->srcFilename) + strlen(".dwt") + 1);
         strcpy(d->outFilename, d->srcFilename);
         strcpy(d->outFilename+strlen(d->srcFilename), ".dwt");
     } else {
@@ -373,18 +618,52 @@ int main(int argc, char **argv)
     if (getImg(d->srcFilename, d->srcImg, inputSize) == -1) 
         return -1;
 
+    Dwt2DReferenceContext referenceContext;
+    Dwt2DReferenceContext *referenceContextPtr = NULL;
+    if (saveReferencePath != NULL || verifyReferencePath != NULL) {
+        if (compCount <= 0 || compCount > DWT2D_MAX_COMPONENTS) {
+            fprintf(stderr, "DWT2D reference mode supports 1-%d components\n", DWT2D_MAX_COMPONENTS);
+            return -1;
+        }
+        Dwt2DFileDigest digest;
+        if (dwt2d_compute_file_digest(d->srcFilename, &digest) != 0) {
+            return -1;
+        }
+        referenceContext.save_path = saveReferencePath;
+        referenceContext.verify_path = verifyReferencePath;
+        dwt2d_init_reference(
+            &referenceContext.reference,
+            d->srcFilename,
+            &digest,
+            pixWidth,
+            pixHeight,
+            compCount,
+            bitDepth,
+            dwtLvls,
+            forward,
+            dwt97,
+            writeVisual,
+            dwt97 ? (int)sizeof(float) : (int)sizeof(int),
+            dwt97 ? "float" : "int");
+        referenceContextPtr = &referenceContext;
+    }
+
     /* DWT */
+    int status = 0;
     if (forward == 1) {
         if(dwt97 == 1 )
-            processDWT<float>(d, forward, writeVisual);
+            status = processDWT<float>(d, forward, writeVisual, verifyCpu, referenceContextPtr);
         else // 5/3
-            processDWT<int>(d, forward, writeVisual);
+            status = processDWT<int>(d, forward, writeVisual, verifyCpu, referenceContextPtr);
     }
     else { // reverse
         if(dwt97 == 1 )
-            processDWT<float>(d, forward, writeVisual);
+            status = processDWT<float>(d, forward, writeVisual, verifyCpu, referenceContextPtr);
         else // 5/3
-            processDWT<int>(d, forward, writeVisual);
+            status = processDWT<int>(d, forward, writeVisual, verifyCpu, referenceContextPtr);
+    }
+    if (status == 0 && dwt2d_finish_reference(referenceContextPtr) != 0) {
+        status = 1;
     }
 
     //writeComponent(r_cuda, pixWidth, pixHeight, srcFilename, ".g");
@@ -394,5 +673,5 @@ int main(int argc, char **argv)
     cudaFreeHost(d->srcImg);
     cudaCheckError("Cuda free host");
 
-    return 0;
+    return status;
 }

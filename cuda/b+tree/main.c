@@ -86,6 +86,7 @@
 
 #include "./kernel/kernel_gpu_cuda_wrapper.h"		// (in directory provided here)
 #include "./kernel/kernel_gpu_cuda_wrapper_2.h"		// (in directory provided here)
+#include "../../common/rodinia_verify.h"
 
 //======================================================================================================================================================150
 //	HEADER
@@ -121,6 +122,8 @@ long maxheight;
 * default value.
 */
 int order = DEFAULT_ORDER;
+static int g_btree_verify_cpu = 0;
+static int g_btree_verified_queries = 0;
 
 /* The queue is used to print the tree in
 * level order, starting from the root
@@ -135,6 +138,128 @@ node *queue = NULL;
 * next to their corresponding keys.
 */
 bool verbose_output = false;
+
+enum {
+	BTREE_REFERENCE_SUCCESS = 0,
+	BTREE_REFERENCE_FAILURE = 1
+};
+
+static int fail_btree_argument(const char* message)
+{
+	fprintf(stderr, "ERROR: %s\n", message);
+	return EXIT_FAILURE;
+}
+
+static int btree_record_index_for_key(node* root, int key)
+{
+	if(root == NULL){
+		return -1;
+	}
+
+	node* current = root;
+	while(!current->is_leaf){
+		current = (node*)current->pointers[0];
+	}
+
+	int record_index = 0;
+	while(current != NULL){
+		for(int index=0; index<current->num_keys; index=index+1){
+			if(current->keys[index] == key){
+				return record_index;
+			}
+			if(current->keys[index] > key){
+				return -1;
+			}
+			record_index = record_index+1;
+		}
+		current = (node*)current->pointers[order-1];
+	}
+
+	return -1;
+}
+
+static int verify_btree_find_results(node* root, const int* keys, const record* actual, int count)
+{
+	int mismatches = 0;
+
+	for(int index=0; index<count; index=index+1){
+		record* expected_record = find(root, keys[index], false);
+		int expected_value = expected_record == NULL ? -1 : expected_record->value;
+		if(actual[index].value == expected_value){
+			continue;
+		}
+
+		fprintf(
+				stderr,
+				"B+tree CPU reference mismatch for k query %d key=%d: actual=%d expected=%d\n",
+				index,
+				keys[index],
+				actual[index].value,
+				expected_value);
+		mismatches = mismatches+1;
+	}
+
+	if(mismatches != 0){
+		fprintf(stderr, "B+tree CPU reference verification failed for k with %d mismatch(es)\n", mismatches);
+		return BTREE_REFERENCE_FAILURE;
+	}
+
+	rodinia_print_pass("B+tree CPU reference verification");
+	return BTREE_REFERENCE_SUCCESS;
+}
+
+static int verify_btree_range_results(
+		node* root,
+		const int* start,
+		const int* end,
+		const int* actual_start,
+		const int* actual_length,
+		int count)
+{
+	int mismatches = 0;
+
+	for(int index=0; index<count; index=index+1){
+		int expected_start = btree_record_index_for_key(root, start[index]);
+		int expected_end = btree_record_index_for_key(root, end[index]);
+		if(expected_start < 0 || expected_end < expected_start){
+			fprintf(
+					stderr,
+					"B+tree CPU reference could not resolve j query %d start=%d end=%d expected_start=%d expected_end=%d\n",
+					index,
+					start[index],
+					end[index],
+					expected_start,
+					expected_end);
+			mismatches = mismatches+1;
+			continue;
+		}
+
+		int expected_length = expected_end - expected_start + 1;
+		if(actual_start[index] == expected_start && actual_length[index] == expected_length){
+			continue;
+		}
+
+		fprintf(
+				stderr,
+				"B+tree CPU reference mismatch for j query %d start=%d end=%d: actual_start=%d expected_start=%d actual_length=%d expected_length=%d\n",
+				index,
+				start[index],
+				end[index],
+				actual_start[index],
+				expected_start,
+				actual_length[index],
+				expected_length);
+		mismatches = mismatches+1;
+	}
+
+	if(mismatches != 0){
+		fprintf(stderr, "B+tree CPU reference verification failed for j with %d mismatch(es)\n", mismatches);
+		return BTREE_REFERENCE_FAILURE;
+	}
+
+	rodinia_print_pass("B+tree CPU reference verification");
+	return BTREE_REFERENCE_SUCCESS;
+}
 
 //========================================================================================================================================================================================================200
 //	FUNCTIONS
@@ -1887,34 +2012,36 @@ main(	int argc,
 	  // check if -file
 	  if(strcmp(argv[cur_arg], "file")==0){
 	    // check if value provided
-	    if(argc>=cur_arg+1){
+	    if(argc>cur_arg+1){
 	      input_file = argv[cur_arg+1];
 	      cur_arg = cur_arg+1;
 	      // value is not a number
 	    }
 	    // value not provided
 	    else{
-	      printf("ERROR: Missing value to -file parameter\n");
-	      return -1;
+	      return fail_btree_argument("Missing value to file parameter");
 	    }
 	  }
 	  else if(strcmp(argv[cur_arg], "command")==0){
 	    // check if value provided
-	    if(argc>=cur_arg+1){
+	    if(argc>cur_arg+1){
 	      command_file = argv[cur_arg+1];
 	      cur_arg = cur_arg+1;
 	      // value is not a number
 	    }
 	    // value not provided
 	    else{
-	      printf("ERROR: Missing value to command parameter\n");
-	      return -1;
+	      return fail_btree_argument("Missing value to command parameter");
 	    }
+	  }
+	  else if(strcmp(argv[cur_arg], "--verify-cpu")==0){
+	    g_btree_verify_cpu = 1;
 	  }
 	}
 	// Print configuration
-	  if((input_file==NULL)||(command_file==NULL))
-	    printf("Usage: ./b+tree file input_file command command_list\n");
+	  if((input_file==NULL)||(command_file==NULL)){
+	    return fail_btree_argument("Usage: ./b+tree file input_file command command_list [--verify-cpu]");
+	  }
 
 	  // For debug
 	  printf("Input File: %s \n", input_file);
@@ -1954,8 +2081,11 @@ main(	int argc,
 
 
      pFile = fopen (output,"w+");
-     if (pFile==NULL) 
-       fputs ("Fail to open %s !\n",output);
+     if (pFile==NULL){
+       fprintf(stderr, "Fail to open %s !\n",output);
+       free(commandBuffer);
+       return EXIT_FAILURE;
+     }
      fprintf(pFile,"******starting******\n");
      fclose(pFile);
 
@@ -2210,6 +2340,21 @@ main(	int argc,
 										keys,
 										ans);
 
+				if(g_btree_verify_cpu &&
+					verify_btree_find_results(root, keys, ans, count) != BTREE_REFERENCE_SUCCESS){
+					rodinia_print_fail("B+tree CPU reference verification");
+					free(currKnode);
+					free(offset);
+					free(keys);
+					free(ans);
+					free(commandBuffer);
+					free(mem);
+					return EXIT_FAILURE;
+				}
+				if(g_btree_verify_cpu){
+					g_btree_verified_queries++;
+				}
+
 				/* printf("ans: \n"); */
 				/* for(i = 0; i < count; i++){ */
 				/*   printf("%d    ",ans[i].value); */
@@ -2221,7 +2366,14 @@ main(	int argc,
 				pFile = fopen (output,"aw+");
 				if (pFile==NULL)
 				  {
-				    fputs ("Fail to open %s !\n",output);
+				    fprintf(stderr, "Fail to open %s !\n",output);
+				    free(currKnode);
+				    free(offset);
+				    free(keys);
+				    free(ans);
+				    free(commandBuffer);
+				    free(mem);
+				    return EXIT_FAILURE;
 				  }
 				
 				fprintf(pFile,"\n ******command: k count=%d \n",count);
@@ -2364,11 +2516,40 @@ main(	int argc,
 											recstart,
 											reclength);
 
+				if(g_btree_verify_cpu &&
+					verify_btree_range_results(root, start, end, recstart, reclength, count) != BTREE_REFERENCE_SUCCESS){
+					rodinia_print_fail("B+tree CPU reference verification");
+					free(currKnode);
+					free(offset);
+					free(lastKnode);
+					free(offset_2);
+					free(start);
+					free(end);
+					free(recstart);
+					free(reclength);
+					free(commandBuffer);
+					free(mem);
+					return EXIT_FAILURE;
+				}
+				if(g_btree_verify_cpu){
+					g_btree_verified_queries++;
+				}
 
 				pFile = fopen (output,"aw+");
 				if (pFile==NULL)
 				  {
-				    fputs ("Fail to open %s !\n",output);
+				    fprintf(stderr, "Fail to open %s !\n",output);
+				    free(currKnode);
+				    free(offset);
+				    free(lastKnode);
+				    free(offset_2);
+				    free(start);
+				    free(end);
+				    free(recstart);
+				    free(reclength);
+				    free(commandBuffer);
+				    free(mem);
+				    return EXIT_FAILURE;
 				  }
 
 				fprintf(pFile,"\n******command: j count=%d, rSize=%d \n",count, rSize);				
@@ -2416,7 +2597,15 @@ main(	int argc,
 	// free remaining memory and exit
 	// ------------------------------------------------------------60
 
+	if(g_btree_verify_cpu && g_btree_verified_queries == 0){
+		rodinia_print_fail("B+tree CPU reference verification");
+		free(mem);
+		free(commandBuffer);
+		return EXIT_FAILURE;
+	}
+
 	free(mem);
+	free(commandBuffer);
 	return EXIT_SUCCESS;
 
 }

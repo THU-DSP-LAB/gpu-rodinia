@@ -4,6 +4,8 @@
 #include <stdlib.h> 
 #include <math.h> 
 #include <sys/time.h>
+#include <string.h>
+#include "../../common/rodinia_verify.h"
 
 #define BLOCK_SIZE 16
 #define STR_SIZE 256
@@ -14,6 +16,7 @@
 #define MAX_PD	(3.0e6)
 /* required precision in degrees	*/
 #define PRECISION	0.001
+#define CPU_REFERENCE_TOLERANCE PRECISION
 #define SPEC_HEAT_SI 1.75e6
 #define K_SI 100
 /* capacitance fitting factor	*/
@@ -29,6 +32,7 @@ float amb_temp = 80.0;
 void fatal(const char *s)
 {
     fprintf(stderr, "Error: %s\n", s);
+    exit(EXIT_FAILURE);
 }
 
 void readinput(float *vect, int grid_rows, int grid_cols, int layers, char *file) {
@@ -134,7 +138,7 @@ float accuracy(float *arr1, float *arr2, int len)
 
 void usage(int argc, char **argv)
 {
-    fprintf(stderr, "Usage: %s <rows/cols> <layers> <iterations> <powerFile> <tempFile> <outputFile>\n", argv[0]);
+    fprintf(stderr, "Usage: %s <rows/cols> <layers> <iterations> <powerFile> <tempFile> <outputFile> [--verify-cpu]\n", argv[0]);
     fprintf(stderr, "\t<rows/cols>  - number of rows/cols in the grid (positive integer)\n");
     fprintf(stderr, "\t<layers>  - number of layers in the grid (positive integer)\n");
 
@@ -147,7 +151,7 @@ void usage(int argc, char **argv)
 
 int main(int argc, char** argv)
 {
-    if (argc != 7)
+    if (argc != 7 && argc != 8)
     {
         usage(argc,argv);
     }
@@ -161,6 +165,14 @@ int main(int argc, char** argv)
     int numCols = atoi(argv[1]);
     int numRows = atoi(argv[1]);
     int layers = atoi(argv[2]);
+    int verify_cpu = 0;
+    if (argc == 8) {
+        if (strcmp(argv[7], "--verify-cpu") != 0) {
+            fprintf(stderr, "Unknown option: %s\n", argv[7]);
+            usage(argc, argv);
+        }
+        verify_cpu = 1;
+    }
 
     /* calculating parameters*/
 
@@ -193,16 +205,26 @@ int main(int argc, char** argv)
 
     hotspot_opt1(powerIn, tempIn, tempOut, numCols, numRows, layers, Cap, Rx, Ry, Rz, dt,iterations);
 
-    computeTempCPU(powerIn, tempCopy, answer, numCols, numRows, layers, Cap, Rx, Ry, Rz, dt,iterations);
-    if ((iterations & 1) == 0)
-        memcpy(answer, tempCopy, size * sizeof(float));
+    int status = EXIT_SUCCESS;
+    if (verify_cpu) {
+        computeTempCPU(powerIn, tempCopy, answer, numCols, numRows, layers, Cap, Rx, Ry, Rz, dt,iterations);
+        if ((iterations & 1) == 0)
+            memcpy(answer, tempCopy, size * sizeof(float));
 
-    float acc = accuracy(tempOut,answer,numRows*numCols*layers);
-    printf("Accuracy: %e\n",acc);
+        float acc = accuracy(tempOut,answer,numRows*numCols*layers);
+        printf("Accuracy: %e\n",acc);
+        if (!(acc <= CPU_REFERENCE_TOLERANCE)) {
+            fprintf(stderr, "HotSpot3D CPU reference mismatch: accuracy=%e tolerance=%e\n", acc, CPU_REFERENCE_TOLERANCE);
+            rodinia_print_fail("HotSpot3D CPU reference verification");
+            status = EXIT_FAILURE;
+        } else {
+            rodinia_print_pass("HotSpot3D CPU reference verification");
+        }
+    }
     writeoutput(tempOut,numRows, numCols, layers, ofile);
     free(tempIn);
+    free(tempCopy);
+    free(answer);
     free(tempOut); free(powerIn);
-    return 0;
+    return status;
 }	
-
-

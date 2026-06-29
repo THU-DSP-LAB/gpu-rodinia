@@ -13,6 +13,7 @@
 #include <iostream>
 #include "bucketsort.cuh"
 #include "mergesort.cuh"
+#include "../../common/rodinia_verify.h"
 using namespace std; 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -48,6 +49,21 @@ void cudaSort(float *origList, float minimum, float maximum,
 int
 main( int argc, char** argv)
 { 
+  int status = EXIT_SUCCESS;
+  int verify_cpu = 0;
+
+  if (argc < 2) {
+    fprintf(stderr, "Usage: %s <r|input_file> [--verify-cpu]\n", argv[0]);
+    return EXIT_FAILURE;
+  }
+  for (int arg = 2; arg < argc; arg++) {
+    if (strcmp(argv[arg], "--verify-cpu") == 0) {
+      verify_cpu = 1;
+      continue;
+    }
+    fprintf(stderr, "Unknown option: %s\n", argv[arg]);
+    return EXIT_FAILURE;
+  }
 
   // Create timers for each sort
     sdkCreateTimer(&uploadTimer);
@@ -116,7 +132,7 @@ main( int argc, char** argv)
 	for (int i = 0; i < TEST; i++) 
 		cudaSort(cpu_idata, datamin, datamax, gpu_odata, numElements);		
 	cout << "done.\n";
-#ifdef VERIFY
+if (verify_cpu) {
 	cout << "Sorting on CPU..." << flush; 
 	// CPU Sort
 	memcpy(cpu_odata, cpu_idata, mem_size); 		
@@ -135,15 +151,18 @@ main( int argc, char** argv)
 			count++; 
 			break; 
 		}
-	if(count == 0) cout << "PASSED.\n";
-	else cout << "FAILED.\n";
-#endif
+	if(count == 0) rodinia_print_pass("Hybridsort CPU reference verification");
+	else {
+		rodinia_print_fail("Hybridsort CPU reference verification");
+		status = EXIT_FAILURE;
+	}
+}
 	// Timer report
 	printf("GPU iterations: %d\n", TEST); 
 #ifdef TIMER
-#ifdef VERIFY
-	printf("Average CPU execution time: %f ms\n", sdkGetTimerValue(&cpuTimer));
-#endif
+	if (verify_cpu) {
+		printf("Average CPU execution time: %f ms\n", sdkGetTimerValue(&cpuTimer));
+	}
 	printf("Average GPU execution time: %f ms\n", sdkGetTimerValue(&totalTimer) / TEST);
 	printf("    - Upload		: %f ms\n", sdkGetTimerValue(&uploadTimer) / TEST);
 	printf("    - Download		: %f ms\n", sdkGetTimerValue(&downloadTimer) / TEST);
@@ -170,6 +189,7 @@ main( int argc, char** argv)
     sdkDeleteTimer(&totalTimer);
     sdkDeleteTimer(&cpuTimer);
 	free(cpu_idata); free(cpu_odata); free(gpu_odata); 
+	return status;
 }
 
 

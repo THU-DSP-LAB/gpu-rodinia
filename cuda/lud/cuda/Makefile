@@ -1,3 +1,5 @@
+include ../../../common/make.config
+
 CC = gcc
 NVCC = nvcc
 
@@ -8,7 +10,7 @@ DEFS += \
 NVCCFLAGS += -I../common \
 			 -O3 \
 			 -use_fast_math \
-			 -arch=sm_20 \
+			 $(CUDA_GENCODE_FLAGS) \
 			 -lm \
 			 $(SPACE)
 
@@ -38,11 +40,11 @@ all : $(EXECUTABLE)
 
 clang: $(SRC)
 	clang++ lud.cu lud_kernel.cu ../common/common.c -o $(EXECUTABLE) \
-		-I../common -I../../util --cuda-gpu-arch=sm_20 \
-		-L/usr/local/cuda/lib64 -lcudart_static -ldl -lrt -pthread -DTIMING
+		-I../common -I../../util --cuda-gpu-arch=$(CUDA_CLANG_ARCH) \
+		-L$(CUDA_LIB_DIR) -lcudart -DTIMING
 
 $(EXECUTABLE) : $(OBJS)
-	$(NVCC) $(NVCCFLAGS) -o $@  $?
+	$(NVCC) $(CUDA_CUDART_FLAGS) $(NVCCFLAGS) -o $@  $?
 
 clean:
 	rm -f $(EXECUTABLE) $(OBJS) *.linkinfo

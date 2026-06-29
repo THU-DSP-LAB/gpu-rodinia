@@ -171,6 +171,13 @@ struct ReferencePage {
     Reference ref;
 };
 
+struct MummerGpuOutputSummary {
+    unsigned long long hash;
+    unsigned long long bytes;
+    unsigned long long lines;
+    unsigned long long headers;
+};
+
 TextureAddress id2addr(int id);
 
 int createReference(const char* fromFile, Reference* ref);
@@ -200,6 +207,12 @@ int destroyMatchContext(MatchContext* ctx);
 int matchQueries(MatchContext* ctx);
 
 void printStringForError(int err);
+
+void resetMummerGpuOutputSummary();
+void getMummerGpuOutputSummary(MummerGpuOutputSummary* summary);
+int setMummerGpuOutputFile(const char* path);
+void setMummerGpuSuppressStdout(int suppress);
+void closeMummerGpuOutputFile();
 
 // Timer management
 struct Timer_t

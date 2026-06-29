@@ -10,6 +10,16 @@
 #include "embedded_fehlberg_7_8.cu"
 #include "solver.cu"
 
+static int workMemoryBytes(long long count, long long bytes_per_item, long long *bytes)
+{
+	const long long memory_limit_bytes = 1000000000LL;
+	if (count <= 0 || bytes_per_item <= 0 || count > memory_limit_bytes / bytes_per_item) {
+		return -1;
+	}
+	*bytes = count * bytes_per_item;
+	return 0;
+}
+
 //====================================================================================================100
 //	MAIN FUNCTION
 //====================================================================================================100
@@ -61,10 +71,11 @@ int work(	int xmax,
 	//		MEMORY CHECK
 	//============================================================60
 
-	memory = workload*(xmax+1)*EQUATIONS*4;
-	if(memory>1000000000){
+	if(workMemoryBytes(	workload,
+						((long long)xmax + 1) * EQUATIONS * (long long)sizeof(fp),
+						&memory) != 0){
 		printf("ERROR: trying to allocate more than 1.0GB of memory, decrease workload and span parameters or change memory parameter\n");
-		return 0;
+		return -1;
 	}
 
 	//============================================================60
@@ -123,20 +134,24 @@ int work(	int xmax,
 
 	// y
 	for(i=0; i<workload; i++){
-		read(	"data/myocyte/y.txt",
+		if(read(	"../../data/myocyte/y.txt",
 					y[i][0],
 					EQUATIONS,
 					1,
-					0);
+					0) != 0){
+			return -1;
+		}
 	}
 
 	// params
 	for(i=0; i<workload; i++){
-		read("data/myocyte/params.txt",
+		if(read("../../data/myocyte/params.txt",
 					params[i],
 					PARAMETERS,
 					1,
-					0);
+					0) != 0){
+			return -1;
+		}
 	}
 
 	time3 = get_time();
@@ -160,6 +175,7 @@ int work(	int xmax,
 
 		if(status !=0){
 			printf("STATUS: %d\n", status);
+			return status;
 		}
 
 	}
@@ -169,7 +185,7 @@ int work(	int xmax,
 	  pFile = fopen ("output.txt","w");
 	  if (pFile==NULL)
 	    {
-	  fputs ("fopen example",pFile);
+	  printf("ERROR: could not open output.txt for writing\n");
 	  return -1;
 	}
 	  // print results

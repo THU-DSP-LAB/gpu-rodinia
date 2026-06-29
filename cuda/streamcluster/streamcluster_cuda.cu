@@ -278,6 +278,20 @@ float pgain( long x, Points *points, float z, long int *numcenters, int kmax, bo
 	//=======================================
 	CUDA_SAFE_CALL( cudaMemcpy(work_mem_h, 		  work_mem_d, 	stride * (nThread + 1) * sizeof(float), cudaMemcpyDeviceToHost) );
 	CUDA_SAFE_CALL( cudaMemcpy(switch_membership, switch_membership_d,	 num * sizeof(bool),  cudaMemcpyDeviceToHost) );
+	if(g_verify_cpu)
+	{
+		verifyKernelComputeCostCPU(
+			num,
+			dim,
+			x,
+			points,
+			K,
+			stride,
+			coord_h,
+			center_table,
+			work_mem_h,
+			switch_membership);
+	}
 	
 #ifdef CUDATIME
 	cudaEventRecord(stop,0);

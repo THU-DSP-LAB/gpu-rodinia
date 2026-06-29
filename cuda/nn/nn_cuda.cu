@@ -7,8 +7,11 @@
 #include <stdio.h>
 #include <sys/time.h>
 #include <float.h>
+#include <math.h>
+#include <string.h>
 #include <vector>
 #include "cuda.h"
+#include "../../common/rodinia_verify.h"
 
 #ifdef TIMING
 #include "timing.h"
@@ -35,6 +38,11 @@ float init_time = 0, mem_alloc_time = 0, h2d_time = 0, kernel_time = 0,
 #define REC_LENGTH 53 // size of a record in db
 #define LATITUDE_POS 28	// character position of the latitude value in each record
 #define OPEN 10000	// initial value of nearest neighbors
+#define NN_ABS_TOLERANCE 1.0e-4f
+#define NN_REL_TOLERANCE 1.0e-6f
+#define PARSE_ERROR -1
+#define PARSE_OK 0
+#define PARSE_HELP 1
 
 
 typedef struct latLong
@@ -49,11 +57,24 @@ typedef struct record
   float distance;
 } Record;
 
+typedef struct options
+{
+  char filename[100];
+  int resultsCount;
+  float lat;
+  float lng;
+  int quiet;
+  int timing;
+  int platform;
+  int device;
+  int verify_cpu;
+} ProgramOptions;
+
 int loadData(char *filename,std::vector<Record> &records,std::vector<LatLong> &locations);
 void findLowest(std::vector<Record> &records,float *distances,int numRecords,int topN);
 void printUsage();
-int parseCommandline(int argc, char *argv[], char* filename,int *r,float *lat,float *lng,
-                     int *q, int *t, int *p, int *d);
+int parseCommandline(int argc, char *argv[], ProgramOptions *options);
+int verifyCpuReference(const std::vector<LatLong> &locations, const float *distances, int numRecords, float lat, float lng);
 
 /**
 * Kernel
@@ -78,23 +99,23 @@ __global__ void euclid(LatLong *d_locations, float *d_distances, int numRecords,
 int main(int argc, char* argv[])
 {
 	int    i=0;
-	float lat, lng;
-	int quiet=0,timing=0,platform=0,device=0;
+	int status = EXIT_SUCCESS;
+	ProgramOptions options;
+	memset(&options, 0, sizeof(options));
+	options.resultsCount = 10;
 
     std::vector<Record> records;
-	std::vector<LatLong> locations;
-	char filename[100];
-	int resultsCount=10;
+    std::vector<LatLong> locations;
 
     // parse command line
-    if (parseCommandline(argc, argv, filename,&resultsCount,&lat,&lng,
-                     &quiet, &timing, &platform, &device)) {
+    int parseStatus = parseCommandline(argc, argv, &options);
+    if (parseStatus != PARSE_OK) {
       printUsage();
-      return 0;
+      return parseStatus == PARSE_HELP ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
-    int numRecords = loadData(filename,records,locations);
-    if (resultsCount > numRecords) resultsCount = numRecords;
+    int numRecords = loadData(options.filename,records,locations);
+    if (options.resultsCount > numRecords) options.resultsCount = numRecords;
 
     //for(i=0;i<numRecords;i++)
     //  printf("%s, %f, %f\n",(records[i].recString),locations[i].lat,locations[i].lng);
@@ -110,13 +131,13 @@ int main(int argc, char* argv[])
 	// Scaling calculations - added by Sam Kauffman
 	cudaDeviceProp deviceProp;
 	cudaGetDeviceProperties( &deviceProp, 0 );
-	cudaThreadSynchronize();
+	cudaDeviceSynchronize();
 	unsigned long maxGridX = deviceProp.maxGridSize[0];
 	unsigned long threadsPerBlock = min( deviceProp.maxThreadsPerBlock, DEFAULT_THREADS_PER_BLOCK );
 	size_t totalDeviceMemory;
 	size_t freeDeviceMemory;
 	cudaMemGetInfo(  &freeDeviceMemory, &totalDeviceMemory );
-	cudaThreadSynchronize();
+	cudaDeviceSynchronize();
 	unsigned long usableDeviceMemory = freeDeviceMemory * 85 / 100; // 85% arbitrary throttle to compensate for known CUDA bug
 	unsigned long maxThreads = usableDeviceMemory / 12; // 4 bytes in 3 vectors per thread
 	if ( numRecords > maxThreads )
@@ -164,8 +185,8 @@ int main(int argc, char* argv[])
   gettimeofday(&tv_kernel_start, NULL);
 #endif
 
-    euclid<<< gridDim, threadsPerBlock >>>(d_locations,d_distances,numRecords,lat,lng);
-    cudaThreadSynchronize();
+    euclid<<< gridDim, threadsPerBlock >>>(d_locations,d_distances,numRecords,options.lat,options.lng);
+    cudaDeviceSynchronize();
 
 #ifdef  TIMING
     gettimeofday(&tv_kernel_end, NULL);
@@ -176,12 +197,20 @@ int main(int argc, char* argv[])
     //Copy data from device memory to host memory
     cudaMemcpy( distances, d_distances, sizeof(float)*numRecords, cudaMemcpyDeviceToHost );
 
+	if (options.verify_cpu &&
+	    verifyCpuReference(locations, distances, numRecords, options.lat, options.lng) != 0) {
+	  rodinia_print_fail("NN CPU reference verification");
+	  status = EXIT_FAILURE;
+	}
+
 	// find the resultsCount least distances
-    findLowest(records,distances,numRecords,resultsCount);
+    if (status == EXIT_SUCCESS) {
+      findLowest(records,distances,numRecords,options.resultsCount);
+    }
 
     // print out results
-    if (!quiet)
-    for(i=0;i<resultsCount;i++) {
+    if (!options.quiet && status == EXIT_SUCCESS)
+    for(i=0;i<options.resultsCount;i++) {
       printf("%s --> Distance=%f\n",records[i].recString,records[i].distance);
     }
     free(distances);
@@ -192,6 +221,7 @@ int main(int argc, char* argv[])
 #ifdef  TIMING
     printf("Exec: %f\n", kernel_time);
 #endif
+	return status;
 }
 
 int loadData(char *filename,std::vector<Record> &records,std::vector<LatLong> &locations){
@@ -203,6 +233,10 @@ int loadData(char *filename,std::vector<Record> &records,std::vector<LatLong> &l
     /**Main processing **/
 
     flist = fopen(filename, "r");
+    if (!flist) {
+        fprintf(stderr, "error opening filelist %s\n", filename);
+        exit(1);
+    }
 	while(!feof(flist)) {
 		/**
 		* Read in all records of length REC_LENGTH
@@ -211,7 +245,7 @@ int loadData(char *filename,std::vector<Record> &records,std::vector<LatLong> &l
 		*/
 		if(fscanf(flist, "%s\n", dbname) != 1) {
             fprintf(stderr, "error reading filelist\n");
-            exit(0);
+            exit(1);
         }
         fp = fopen(dbname, "r");
         if(!fp) {
@@ -275,58 +309,90 @@ void findLowest(std::vector<Record> &records,float *distances,int numRecords,int
   }
 }
 
-int parseCommandline(int argc, char *argv[], char* filename,int *r,float *lat,float *lng,
-                     int *q, int *t, int *p, int *d){
-    int i;
-    if (argc < 2) return 1; // error
-    strncpy(filename,argv[1],100);
-    char flag;
+int verifyCpuReference(const std::vector<LatLong> &locations, const float *distances, int numRecords, float lat, float lng)
+{
+  for (int i = 0; i < numRecords; i++) {
+    float deltaLat = lat - locations[i].lat;
+    float deltaLng = lng - locations[i].lng;
+    float expected = sqrtf(deltaLat * deltaLat + deltaLng * deltaLng);
+    float diff = fabsf(distances[i] - expected);
+    float tolerance = NN_ABS_TOLERANCE + NN_REL_TOLERANCE * fabsf(expected);
+    if (!isfinite(distances[i]) || !isfinite(expected) || diff > tolerance) {
+      fprintf(stderr,
+              "NN CPU reference mismatch at record %d: actual=%g expected=%g diff=%g tolerance=%g\n",
+              i,
+              distances[i],
+              expected,
+              diff,
+              tolerance);
+      return -1;
+    }
+  }
 
-    for(i=1;i<argc;i++) {
-      if (argv[i][0]=='-') {// flag
-        flag = argv[i][1];
-          switch (flag) {
-            case 'r': // number of results
-              i++;
-              *r = atoi(argv[i]);
-              break;
-            case 'l': // lat or lng
-              if (argv[i][2]=='a') {//lat
-                *lat = atof(argv[i+1]);
-              }
-              else {//lng
-                *lng = atof(argv[i+1]);
-              }
-              i++;
-              break;
-            case 'h': // help
-              return 1;
-            case 'q': // quiet
-              *q = 1;
-              break;
-            case 't': // timing
-              *t = 1;
-              break;
-            case 'p': // platform
-              i++;
-              *p = atoi(argv[i]);
-              break;
-            case 'd': // device
-              i++;
-              *d = atoi(argv[i]);
-              break;
-        }
+  return rodinia_print_pass("NN CPU reference verification");
+}
+
+int parseCommandline(int argc, char *argv[], ProgramOptions *options){
+    int i;
+    if (argc < 2) return PARSE_ERROR; // error
+    if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
+      return PARSE_HELP;
+    }
+    if (argv[1][0] == '-') {
+      fprintf(stderr, "Missing filename before option: %s\n", argv[1]);
+      return PARSE_ERROR;
+    }
+    strncpy(options->filename,argv[1],sizeof(options->filename) - 1);
+    options->filename[sizeof(options->filename) - 1] = '\0';
+
+    for(i=2;i<argc;i++) {
+      if (strcmp(argv[i], "--verify-cpu") == 0) {
+        options->verify_cpu = 1;
+      }
+      else if (strcmp(argv[i], "-r") == 0) {
+        if (++i >= argc) return PARSE_ERROR;
+        options->resultsCount = atoi(argv[i]);
+      }
+      else if (strcmp(argv[i], "-lat") == 0) {
+        if (++i >= argc) return PARSE_ERROR;
+        options->lat = atof(argv[i]);
+      }
+      else if (strcmp(argv[i], "-lng") == 0) {
+        if (++i >= argc) return PARSE_ERROR;
+        options->lng = atof(argv[i]);
+      }
+      else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+        return PARSE_HELP;
+      }
+      else if (strcmp(argv[i], "-q") == 0) {
+        options->quiet = 1;
+      }
+      else if (strcmp(argv[i], "-t") == 0) {
+        options->timing = 1;
+      }
+      else if (strcmp(argv[i], "-p") == 0) {
+        if (++i >= argc) return PARSE_ERROR;
+        options->platform = atoi(argv[i]);
+      }
+      else if (strcmp(argv[i], "-d") == 0) {
+        if (++i >= argc) return PARSE_ERROR;
+        options->device = atoi(argv[i]);
+      }
+      else {
+        fprintf(stderr, "Unknown option: %s\n", argv[i]);
+        return PARSE_ERROR;
       }
     }
-    if ((*d >= 0 && *p<0) || (*p>=0 && *d<0)) // both p and d must be specified if either are specified
-      return 1;
-    return 0;
+    if ((options->device >= 0 && options->platform < 0) ||
+        (options->platform >= 0 && options->device < 0)) // both p and d must be specified if either are specified
+      return PARSE_ERROR;
+    return PARSE_OK;
 }
 
 void printUsage(){
   printf("Nearest Neighbor Usage\n");
   printf("\n");
-  printf("nearestNeighbor [filename] -r [int] -lat [float] -lng [float] [-hqt] [-p [int] -d [int]]\n");
+  printf("nearestNeighbor [filename] -r [int] -lat [float] -lng [float] [-hqt] [--verify-cpu] [-p [int] -d [int]]\n");
   printf("\n");
   printf("example:\n");
   printf("$ ./nearestNeighbor filelist.txt -r 5 -lat 30 -lng 90\n");

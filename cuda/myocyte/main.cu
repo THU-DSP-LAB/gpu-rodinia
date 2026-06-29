@@ -83,6 +83,9 @@
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
+#include <stdint.h>
+#include <errno.h>
+#include <limits.h>
 
 #include "define.c"
 
@@ -91,6 +94,51 @@
 
 #include "work.cu"
 #include "work_2.cu"
+#include "myocyte_reference.c"
+
+enum {
+	DECIMAL_ARGUMENT_BASE = 10,
+	MYOCYTE_MODE_INTRA_INSTANCE = 0,
+	MYOCYTE_MODE_INTER_INSTANCE = 1
+};
+
+typedef struct {
+	const char *text;
+	const char *name;
+	int min_value;
+	int max_value;
+} IntegerArgument;
+
+static int isDecimalArgument(const char *text)
+{
+	if (text[0] == '\0') {
+		return 0;
+	}
+	for (const char *cursor = text; *cursor != '\0'; ++cursor) {
+		if (*cursor < '0' || *cursor > '9') {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+static int parseIntegerArgument(const IntegerArgument *argument, int *value)
+{
+	char *end = NULL;
+	if (!isDecimalArgument(argument->text)) {
+		fprintf(stderr, "ERROR: invalid %s argument '%s'\n", argument->name, argument->text);
+		return -1;
+	}
+	errno = 0;
+	long parsed = strtol(argument->text, &end, DECIMAL_ARGUMENT_BASE);
+	if (*end != '\0' || errno == ERANGE ||
+		parsed < argument->min_value || parsed > argument->max_value) {
+		fprintf(stderr, "ERROR: invalid %s argument '%s'\n", argument->name, argument->text);
+		return -1;
+	}
+	*value = (int)parsed;
+	return 0;
+}
 
 //====================================================================================================100
 //		MAIN FUNCTION
@@ -118,9 +166,10 @@ int main(int argc, char *argv []){
 	//		CHECK NUMBER OF ARGUMENTS
 	//============================================================60
 
-	if(argc!=4){
-		printf("ERROR: %d is the incorrect number of arguments, the number of arguments must be 3\n", argc-1);
-		return 0;
+	if(argc != 4 && argc != 6){
+		fprintf(stderr, "ERROR: %d is the incorrect number of arguments\n", argc - 1);
+		printUsage(argv[0]);
+		return 1;
 	}
 
 	//============================================================60
@@ -133,42 +182,57 @@ int main(int argc, char *argv []){
 		//		SPAN
 		//========================================40
 
-		xmax = atoi(argv[1]);
-		if(xmax<0){
-			printf("ERROR: %d is the incorrect end of simulation interval, use numbers > 0\n", xmax);
-			return 0;
+		IntegerArgument xmax_argument = { argv[1], "xmax", 1, INT_MAX };
+		if(parseIntegerArgument(&xmax_argument, &xmax) != 0){
+			return 1;
 		}
 
 		//========================================40
 		//		WORKLOAD
 		//========================================40
 
-		workload = atoi(argv[2]);
-		if(workload<0){
-			printf("ERROR: %d is the incorrect number of instances of simulation, use numbers > 0\n", workload);
-			return 0;
+		IntegerArgument workload_argument = { argv[2], "workload", 1, INT_MAX };
+		if(parseIntegerArgument(&workload_argument, &workload) != 0){
+			return 1;
 		}
 
 		//========================================40
 		//		MODE
 		//========================================40
 
-		mode = 0;
-		mode = atoi(argv[3]);
-		if(mode != 0 && mode != 1){
-			printf("ERROR: %d is the incorrect mode, it should be omitted or equal to 0 or 1\n", mode);
-			return 0;
+		IntegerArgument mode_argument = { argv[3], "mode", MYOCYTE_MODE_INTRA_INSTANCE, MYOCYTE_MODE_INTER_INSTANCE };
+		if(parseIntegerArgument(&mode_argument, &mode) != 0){
+			return 1;
 		}
 
+	}
+
+	const char *save_reference_path = NULL;
+	const char *verify_reference_path = NULL;
+	if (argc == 6) {
+		if (strcmp(argv[4], "--save-reference") == 0) {
+			save_reference_path = argv[5];
+		} else if (strcmp(argv[4], "--verify-reference") == 0) {
+			verify_reference_path = argv[5];
+		} else {
+			fprintf(stderr, "ERROR: unknown reference option: %s\n", argv[4]);
+			printUsage(argv[0]);
+			return 1;
+		}
+	}
+	if ((save_reference_path != NULL || verify_reference_path != NULL) && mode != 0) {
+		fprintf(stderr, "ERROR: myocyte reference verification requires mode 0 because mode 1 does not write output.txt\n");
+		return 1;
 	}
 
 	//================================================================================80
 	//		EXECUTION IF THERE IS 1 WORKLOAD, PARALLELIZE INSIDE 1 WORKLOAD
 	//================================================================================80
 
+	int status = 0;
 	if(mode == 0){
 
-		work(	xmax,
+		status = work(	xmax,
 					workload);
 
 	}
@@ -179,9 +243,29 @@ int main(int argc, char *argv []){
 
 	else{
 
-		work_2(	xmax,
+		status = work_2(	xmax,
 						workload);
 
+	}
+
+	if (status != 0) {
+		return status;
+	}
+
+	if (save_reference_path != NULL || verify_reference_path != NULL) {
+		MyocyteReference reference;
+		if (populateReference(xmax, workload, mode, &reference) != 0) {
+			return 1;
+		}
+		if (save_reference_path != NULL) {
+			if (writeReference(save_reference_path, &reference) != 0) {
+				return 1;
+			}
+			printf("Myocyte reference saved to '%s'\n", save_reference_path);
+		}
+		if (verify_reference_path != NULL && verifyReference(verify_reference_path, &reference) != 0) {
+			return 1;
+		}
 	}
 
 //====================================================================================================100

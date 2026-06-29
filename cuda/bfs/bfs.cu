@@ -20,12 +20,29 @@
 #include <string.h>
 #include <math.h>
 #include <cuda.h>
+#include <stdint.h>
+#include "../../common/rodinia_verify.h"
 
 #ifdef TIMING
 #include "timing.h"
 #endif
 
 #define MAX_THREADS_PER_BLOCK 512
+#define BFS_RESULT_FILE "result.txt"
+#define BFS_REFERENCE_MAGIC "GPIDL_RODINIA_BFS_REFERENCE"
+#define BFS_REFERENCE_VERSION 1
+
+typedef enum {
+	REFERENCE_MODE_RUN = 0,
+	REFERENCE_MODE_SAVE,
+	REFERENCE_MODE_VERIFY
+} ReferenceMode;
+
+typedef struct {
+	ReferenceMode mode;
+	const char *path;
+	bool verify_cpu;
+} ReferenceOptions;
 
 int no_of_nodes;
 int edge_list_size;
@@ -53,7 +70,7 @@ struct Node
 #include "kernel.cu"
 #include "kernel2.cu"
 
-void BFSGraph(int argc, char** argv);
+int BFSGraph(int argc, char** argv);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Main Program
@@ -62,24 +79,278 @@ int main( int argc, char** argv)
 {
 	no_of_nodes=0;
 	edge_list_size=0;
-	BFSGraph( argc, argv);
+	return BFSGraph( argc, argv);
 }
 
 void Usage(int argc, char**argv){
 
 fprintf(stderr,"Usage: %s <input_file>\n", argv[0]);
+fprintf(stderr,"       %s <input_file> --verify-cpu\n", argv[0]);
+fprintf(stderr,"       %s <input_file> --save-reference <path>\n", argv[0]);
+fprintf(stderr,"       %s <input_file> --verify-reference <path>\n", argv[0]);
 
+}
+
+int parse_reference_options(int argc, char **argv, ReferenceOptions *options)
+{
+	options->mode = REFERENCE_MODE_RUN;
+	options->path = NULL;
+	options->verify_cpu = false;
+	for (int index = 2; index < argc; index++) {
+		if (strcmp(argv[index], "--verify-cpu") == 0) {
+			options->verify_cpu = true;
+			continue;
+		}
+		if (strcmp(argv[index], "--save-reference") == 0 ||
+			strcmp(argv[index], "--verify-reference") == 0) {
+			if (index + 1 >= argc) {
+				fprintf(stderr, "Missing reference path for %s\n", argv[index]);
+				Usage(argc, argv);
+				return -1;
+			}
+			if (options->mode != REFERENCE_MODE_RUN) {
+				fprintf(stderr, "Only one reference file mode may be specified\n");
+				return -1;
+			}
+			options->mode = strcmp(argv[index], "--save-reference") == 0 ?
+				REFERENCE_MODE_SAVE :
+				REFERENCE_MODE_VERIFY;
+			options->path = argv[index + 1];
+			index++;
+			continue;
+		}
+		fprintf(stderr, "Unknown option: '%s'\n", argv[index]);
+		Usage(argc, argv);
+		return -1;
+	}
+	if (argc < 2) {
+		Usage(argc, argv);
+		return -1;
+	}
+	return 0;
+}
+
+uint64_t fnv1a_file_hash(const char *path)
+{
+	const uint64_t offset = 1469598103934665603ULL;
+	const uint64_t prime = 1099511628211ULL;
+	uint64_t hash = offset;
+	FILE *file = fopen(path, "rb");
+	if (file == NULL) {
+		fprintf(stderr, "Cannot open input for hashing: %s\n", path);
+		return 0;
+	}
+	for (;;) {
+		int byte = fgetc(file);
+		if (byte == EOF) {
+			break;
+		}
+		hash ^= (uint8_t)byte;
+		hash *= prime;
+	}
+	fclose(file);
+	return hash;
+}
+
+int write_result_file(const int *costs, int count)
+{
+	FILE *fpo = fopen(BFS_RESULT_FILE, "w");
+	if (fpo == NULL) {
+		fprintf(stderr, "Cannot open %s for write\n", BFS_RESULT_FILE);
+		return -1;
+	}
+	for (int i = 0; i < count; i++) {
+		fprintf(fpo, "%d) cost:%d\n", i, costs[i]);
+	}
+	fclose(fpo);
+	return 0;
+}
+
+int save_reference(
+	const char *path,
+	uint64_t input_hash,
+	const int *costs,
+	int node_count,
+	int edge_count)
+{
+	FILE *file = fopen(path, "w");
+	if (file == NULL) {
+		fprintf(stderr, "Cannot open reference for write: %s\n", path);
+		return -1;
+	}
+	fprintf(file, "%s %d\n", BFS_REFERENCE_MAGIC, BFS_REFERENCE_VERSION);
+	fprintf(file, "input_hash %016llx\n", (unsigned long long)input_hash);
+	fprintf(file, "nodes %d\n", node_count);
+	fprintf(file, "edges %d\n", edge_count);
+	fprintf(file, "costs %d\n", node_count);
+	for (int i = 0; i < node_count; i++) {
+		fprintf(file, "%d\n", costs[i]);
+	}
+	fclose(file);
+	printf("Saved BFS reference to '%s'\n", path);
+	return 0;
+}
+
+int verify_reference_header(
+	FILE *file,
+	uint64_t input_hash,
+	int node_count,
+	int edge_count,
+	int *cost_count)
+{
+	char magic[64];
+	char label[64];
+	int version;
+	unsigned long long reference_hash;
+	int reference_nodes;
+	int reference_edges;
+	if (fscanf(file, "%63s %d", magic, &version) != 2 ||
+		strcmp(magic, BFS_REFERENCE_MAGIC) != 0 ||
+		version != BFS_REFERENCE_VERSION) {
+		fprintf(stderr, "Invalid BFS reference header\n");
+		return -1;
+	}
+	if (fscanf(file, "%63s %llx", label, &reference_hash) != 2 ||
+		strcmp(label, "input_hash") != 0 ||
+		reference_hash != (unsigned long long)input_hash) {
+		fprintf(stderr, "BFS reference input hash mismatch\n");
+		return -1;
+	}
+	if (fscanf(file, "%63s %d", label, &reference_nodes) != 2 ||
+		strcmp(label, "nodes") != 0 ||
+		reference_nodes != node_count) {
+		fprintf(stderr, "BFS reference node count mismatch\n");
+		return -1;
+	}
+	if (fscanf(file, "%63s %d", label, &reference_edges) != 2 ||
+		strcmp(label, "edges") != 0 ||
+		reference_edges != edge_count) {
+		fprintf(stderr, "BFS reference edge count mismatch\n");
+		return -1;
+	}
+	if (fscanf(file, "%63s %d", label, cost_count) != 2 ||
+		strcmp(label, "costs") != 0 ||
+		*cost_count != node_count) {
+		fprintf(stderr, "BFS reference cost count mismatch\n");
+		return -1;
+	}
+	return 0;
+}
+
+int verify_reference(
+	const char *path,
+	uint64_t input_hash,
+	const int *costs,
+	int node_count,
+	int edge_count)
+{
+	FILE *file = fopen(path, "r");
+	int cost_count = 0;
+	if (file == NULL) {
+		fprintf(stderr, "Cannot open reference for read: %s\n", path);
+		return -1;
+	}
+	if (verify_reference_header(file, input_hash, node_count, edge_count, &cost_count) != 0) {
+		fclose(file);
+		return -1;
+	}
+	for (int i = 0; i < cost_count; i++) {
+		int expected;
+		if (fscanf(file, "%d", &expected) != 1) {
+			fprintf(stderr, "BFS reference ended before cost[%d]\n", i);
+			fclose(file);
+			return -1;
+		}
+		if (costs[i] != expected) {
+			fprintf(stderr, "BFS reference mismatch for cost[%d]: actual=%d expected=%d\n", i, costs[i], expected);
+			fclose(file);
+			return -1;
+		}
+	}
+	fclose(file);
+	printf("BFS reference verification matched '%s'\n", path);
+	return rodinia_print_pass("BFS reference verification");
+}
+
+int handle_reference_mode(
+	const ReferenceOptions *options,
+	const char *input_path,
+	const int *costs,
+	int node_count,
+	int edge_count)
+{
+	uint64_t input_hash = 0;
+	if (options->mode == REFERENCE_MODE_RUN) {
+		return 0;
+	}
+	input_hash = fnv1a_file_hash(input_path);
+	if (input_hash == 0) {
+		return -1;
+	}
+	if (options->mode == REFERENCE_MODE_SAVE) {
+		return save_reference(options->path, input_hash, costs, node_count, edge_count);
+	}
+	return verify_reference(options->path, input_hash, costs, node_count, edge_count);
+}
+
+int verify_cpu_reference(const Node *nodes, const int *edges, const int *actual_costs, int node_count, int source)
+{
+	int *expected_costs = (int*) malloc(sizeof(int) * node_count);
+	int *queue = (int*) malloc(sizeof(int) * node_count);
+	int head = 0;
+	int tail = 0;
+	if (expected_costs == NULL || queue == NULL) {
+		fprintf(stderr, "Cannot allocate BFS CPU reference buffers\n");
+		free(expected_costs);
+		free(queue);
+		return -1;
+	}
+	for (int index = 0; index < node_count; index++) {
+		expected_costs[index] = -1;
+	}
+	expected_costs[source] = 0;
+	queue[tail++] = source;
+	while (head < tail) {
+		int node = queue[head++];
+		for (int edge = nodes[node].starting; edge < nodes[node].starting + nodes[node].no_of_edges; edge++) {
+			int neighbor = edges[edge];
+			if (neighbor < 0 || neighbor >= node_count) {
+				fprintf(stderr, "BFS CPU reference saw invalid edge target %d\n", neighbor);
+				free(expected_costs);
+				free(queue);
+				return -1;
+			}
+			if (expected_costs[neighbor] != -1) {
+				continue;
+			}
+			expected_costs[neighbor] = expected_costs[node] + 1;
+			queue[tail++] = neighbor;
+		}
+	}
+	for (int index = 0; index < node_count; index++) {
+		if (actual_costs[index] != expected_costs[index]) {
+			fprintf(stderr, "BFS CPU reference mismatch for cost[%d]: actual=%d expected=%d\n",
+				index, actual_costs[index], expected_costs[index]);
+			free(expected_costs);
+			free(queue);
+			return -1;
+		}
+	}
+	free(expected_costs);
+	free(queue);
+	return rodinia_print_pass("BFS CPU reference verification");
 }
 ////////////////////////////////////////////////////////////////////////////////
 //Apply BFS on a Graph using CUDA
 ////////////////////////////////////////////////////////////////////////////////
-void BFSGraph( int argc, char** argv) 
+int BFSGraph( int argc, char** argv) 
 {
 
     char *input_f;
-	if(argc!=2){
-	Usage(argc, argv);
-	exit(0);
+	ReferenceOptions reference_options;
+	int status = EXIT_SUCCESS;
+	if(parse_reference_options(argc, argv, &reference_options) != 0){
+	return EXIT_FAILURE;
 	}
 
 	input_f = argv[1];
@@ -89,7 +360,7 @@ void BFSGraph( int argc, char** argv)
 	if(!fp)
 	{
 		printf("Error Reading graph file\n");
-		return;
+		return EXIT_FAILURE;
 	}
 
 	int source = 0;
@@ -259,11 +530,21 @@ void BFSGraph( int argc, char** argv)
 #endif
 
 	//Store the result into a file
-	FILE *fpo = fopen("result.txt","w");
-	for(int i=0;i<no_of_nodes;i++)
-		fprintf(fpo,"%d) cost:%d\n",i,h_cost[i]);
-	fclose(fpo);
-	printf("Result stored in result.txt\n");
+	if (write_result_file(h_cost, no_of_nodes) != 0 ||
+		(reference_options.verify_cpu &&
+			verify_cpu_reference(h_graph_nodes, h_graph_edges, h_cost, no_of_nodes, source) != 0) ||
+		handle_reference_mode(&reference_options, input_f, h_cost, no_of_nodes, edge_list_size) != 0) {
+		if (reference_options.verify_cpu) {
+			rodinia_print_fail("BFS CPU reference verification");
+		}
+		if (reference_options.mode == REFERENCE_MODE_VERIFY) {
+			rodinia_print_fail("BFS reference verification");
+		}
+		status = EXIT_FAILURE;
+	}
+	if (status == EXIT_SUCCESS) {
+		printf("Result stored in %s\n", BFS_RESULT_FILE);
+	}
 
 
 	// cleanup memory
@@ -282,6 +563,7 @@ void BFSGraph( int argc, char** argv)
 	cudaFree(d_updating_graph_mask);
 	cudaFree(d_graph_visited);
 	cudaFree(d_cost);
+	cudaFree(d_over);
 
 #ifdef  TIMING
 	gettimeofday(&tv_close_end, NULL);
@@ -298,4 +580,5 @@ void BFSGraph( int argc, char** argv)
 	printf("Close: %f\n", close_time);
 	printf("Total: %f\n", total_time);
 #endif
+	return status;
 }

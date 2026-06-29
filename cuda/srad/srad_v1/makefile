@@ -15,10 +15,10 @@ INCLUDE := $(CUDA_DIR)/include
 
 # link objects(binaries) together
 a.out:		main.o
-	$(CC)	main.o \
+	$(CC)	$(CUDA_CUDART_FLAGS) main.o \
 				-I$(INCLUDE) \
 				-L$(CUDA_LIB_DIR)  \
-				-lm -lcuda -lcudart -o srad
+				-lm -lcudart -lcuda -o srad
 
 # compile main function file into object (binary)
 main.o: 	main.cu \
@@ -31,7 +31,7 @@ main.o: 	main.cu \
 				srad2_kernel.cu \
 				compress_kernel.cu
 	nvcc	main.cu \
-				-c -O3 -arch sm_35
+				-c -O3 $(CUDA_GENCODE_FLAGS)
 
 # delete all object files
 clean:

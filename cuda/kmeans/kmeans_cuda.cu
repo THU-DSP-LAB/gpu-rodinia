@@ -113,7 +113,7 @@ main( int argc, char** argv)
 	// make sure we're running on the big card
     cudaSetDevice(0);
 	// as done in the CUDA start/help document provided
-	setup(argc, argv);    
+	return setup(argc, argv);
 }
 
 //																			  //
@@ -271,4 +271,3 @@ kmeansCuda(float  **feature,				/* in: [npoints][nfeatures] */
 	
 }
 /* ------------------- kmeansCuda() end ------------------------ */    
-

@@ -100,48 +100,128 @@
 					PropertyPageName="Advanced"
 					Category="Code Generation2"
 					Description="Specify the name of the NVIDIA GPU to compile for. This can either be a ‘real’ GPU, or a ‘virtual’ ptx architecture."
-					DefaultValue="4"
+					DefaultValue="17"
 					>
 					<Values>
 						<EnumValue
 							Value="0"
-							Switch="-arch compute_10"
-							DisplayName="1.0 (virtual) Arch"
+							Switch="-arch compute_75"
+							DisplayName="7.5 (virtual) Arch"
 						/>
 						<EnumValue
 							Value="1"
-							Switch="-arch compute_11"
-							DisplayName="1.1 (virtual) Arch"
+							Switch="-arch compute_80"
+							DisplayName="8.0 (virtual) Arch"
 						/>
 						<EnumValue
 							Value="2"
-							Switch="-arch compute_12"
-							DisplayName="1.2 (virtual) Arch"
+							Switch="-arch compute_86"
+							DisplayName="8.6 (virtual) Arch"
 						/>
 						<EnumValue
 							Value="3"
-							Switch="-arch compute_13"
-							DisplayName="1.3 (virtual) Arch"
+							Switch="-arch compute_87"
+							DisplayName="8.7 (virtual) Arch"
 						/>
 						<EnumValue
 							Value="4"
-							Switch="-arch sm_10"
-							DisplayName="1.0 (hardware) Arch"
+							Switch="-arch compute_88"
+							DisplayName="8.8 (virtual) Arch"
 						/>
 						<EnumValue
 							Value="5"
-							Switch="-arch sm_11"
-							DisplayName="1.1 (hardware) Arch"
+							Switch="-arch compute_89"
+							DisplayName="8.9 (virtual) Arch"
 						/>
 						<EnumValue
 							Value="6"
-							Switch="-arch sm_12"
-							DisplayName="1.2 (hardware) Arch"
+							Switch="-arch compute_90"
+							DisplayName="9.0 (virtual) Arch"
 						/>
 						<EnumValue
 							Value="7"
-							Switch="-arch sm_13"
-							DisplayName="1.3 (hardware) Arch"
+							Switch="-arch compute_100"
+							DisplayName="10.0 (virtual) Arch"
+						/>
+						<EnumValue
+							Value="8"
+							Switch="-arch compute_103"
+							DisplayName="10.3 (virtual) Arch"
+						/>
+						<EnumValue
+							Value="9"
+							Switch="-arch compute_110"
+							DisplayName="11.0 (virtual) Arch"
+						/>
+						<EnumValue
+							Value="10"
+							Switch="-arch compute_120"
+							DisplayName="12.0 (virtual) Arch"
+						/>
+						<EnumValue
+							Value="11"
+							Switch="-arch compute_121"
+							DisplayName="12.1 (virtual) Arch"
+						/>
+						<EnumValue
+							Value="12"
+							Switch="-arch sm_75"
+							DisplayName="7.5 (hardware) Arch"
+						/>
+						<EnumValue
+							Value="13"
+							Switch="-arch sm_80"
+							DisplayName="8.0 (hardware) Arch"
+						/>
+						<EnumValue
+							Value="14"
+							Switch="-arch sm_86"
+							DisplayName="8.6 (hardware) Arch"
+						/>
+						<EnumValue
+							Value="15"
+							Switch="-arch sm_87"
+							DisplayName="8.7 (hardware) Arch"
+						/>
+						<EnumValue
+							Value="16"
+							Switch="-arch sm_88"
+							DisplayName="8.8 (hardware) Arch"
+						/>
+						<EnumValue
+							Value="17"
+							Switch="-arch sm_89"
+							DisplayName="8.9 (hardware) Arch"
+						/>
+						<EnumValue
+							Value="18"
+							Switch="-arch sm_90"
+							DisplayName="9.0 (hardware) Arch"
+						/>
+						<EnumValue
+							Value="19"
+							Switch="-arch sm_100"
+							DisplayName="10.0 (hardware) Arch"
+						/>
+						<EnumValue
+							Value="20"
+							Switch="-arch sm_103"
+							DisplayName="10.3 (hardware) Arch"
+						/>
+						<EnumValue
+							Value="21"
+							Switch="-arch sm_110"
+							DisplayName="11.0 (hardware) Arch"
+						/>
+						<EnumValue
+							Value="22"
+							Switch="-arch sm_120"
+							DisplayName="12.0 (hardware) Arch"
+						/>
+						<EnumValue
+							Value="23"
+							Switch="-arch sm_121"
+							DisplayName="12.1 (hardware) Arch"
 						/>
 					</Values>
 				</EnumProperty>
@@ -151,48 +231,128 @@
 					PropertyPageName="Advanced"
 					Category="Code Generation2"
 					Description="Specify the name of nVidia gpu to generate code for."
-					DefaultValue="4"
+					DefaultValue="17"
 					>
 					<Values>
 						<EnumValue
 							Value="0"
-							Switch="-code compute_10"
-							DisplayName="1.0 (virtual) code"
+							Switch="-code compute_75"
+							DisplayName="7.5 (virtual) code"
 						/>
 						<EnumValue
 							Value="1"
-							Switch="-code compute_11"
-							DisplayName="1.1 (virtual) code"
+							Switch="-code compute_80"
+							DisplayName="8.0 (virtual) code"
 						/>
 						<EnumValue
 							Value="2"
-							Switch="-code compute_12"
-							DisplayName="1.2 (virtual) code"
+							Switch="-code compute_86"
+							DisplayName="8.6 (virtual) code"
 						/>
 						<EnumValue
 							Value="3"
-							Switch="-code compute_13"
-							DisplayName="1.3 (virtual) code"
+							Switch="-code compute_87"
+							DisplayName="8.7 (virtual) code"
 						/>
 						<EnumValue
 							Value="4"
-							Switch="-code sm_10"
-							DisplayName="1.0 (hardware) code"
+							Switch="-code compute_88"
+							DisplayName="8.8 (virtual) code"
 						/>
 						<EnumValue
 							Value="5"
-							Switch="-code sm_11"
-							DisplayName="1.1 (hardware) code"
+							Switch="-code compute_89"
+							DisplayName="8.9 (virtual) code"
 						/>
 						<EnumValue
 							Value="6"
-							Switch="-code sm_12"
-							DisplayName="1.2 (hardware) code"
+							Switch="-code compute_90"
+							DisplayName="9.0 (virtual) code"
 						/>
 						<EnumValue
 							Value="7"
-							Switch="-code sm_13"
-							DisplayName="1.3 (hardware) code"
+							Switch="-code compute_100"
+							DisplayName="10.0 (virtual) code"
+						/>
+						<EnumValue
+							Value="8"
+							Switch="-code compute_103"
+							DisplayName="10.3 (virtual) code"
+						/>
+						<EnumValue
+							Value="9"
+							Switch="-code compute_110"
+							DisplayName="11.0 (virtual) code"
+						/>
+						<EnumValue
+							Value="10"
+							Switch="-code compute_120"
+							DisplayName="12.0 (virtual) code"
+						/>
+						<EnumValue
+							Value="11"
+							Switch="-code compute_121"
+							DisplayName="12.1 (virtual) code"
+						/>
+						<EnumValue
+							Value="12"
+							Switch="-code sm_75"
+							DisplayName="7.5 (hardware) code"
+						/>
+						<EnumValue
+							Value="13"
+							Switch="-code sm_80"
+							DisplayName="8.0 (hardware) code"
+						/>
+						<EnumValue
+							Value="14"
+							Switch="-code sm_86"
+							DisplayName="8.6 (hardware) code"
+						/>
+						<EnumValue
+							Value="15"
+							Switch="-code sm_87"
+							DisplayName="8.7 (hardware) code"
+						/>
+						<EnumValue
+							Value="16"
+							Switch="-code sm_88"
+							DisplayName="8.8 (hardware) code"
+						/>
+						<EnumValue
+							Value="17"
+							Switch="-code sm_89"
+							DisplayName="8.9 (hardware) code"
+						/>
+						<EnumValue
+							Value="18"
+							Switch="-code sm_90"
+							DisplayName="9.0 (hardware) code"
+						/>
+						<EnumValue
+							Value="19"
+							Switch="-code sm_100"
+							DisplayName="10.0 (hardware) code"
+						/>
+						<EnumValue
+							Value="20"
+							Switch="-code sm_103"
+							DisplayName="10.3 (hardware) code"
+						/>
+						<EnumValue
+							Value="21"
+							Switch="-code sm_110"
+							DisplayName="11.0 (hardware) code"
+						/>
+						<EnumValue
+							Value="22"
+							Switch="-code sm_120"
+							DisplayName="12.0 (hardware) code"
+						/>
+						<EnumValue
+							Value="23"
+							Switch="-code sm_121"
+							DisplayName="12.1 (hardware) code"
 						/>
 					</Values>
 				</EnumProperty>

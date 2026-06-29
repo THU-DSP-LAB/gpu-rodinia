@@ -1,9 +1,11 @@
 NVCC=nvcc
 CC = g++
 
-CUDA_INCLUDEPATH=/usr/local/cuda-6.5/include
+include ../../common/make.config
 
-NVCC_OPTS=-O3 -arch=sm_35 -Xcompiler -m64 -g -G
+CUDA_INCLUDEPATH=$(CUDA_DIR)/include
+
+NVCC_OPTS=-O3 $(CUDA_GENCODE_FLAGS) -Xcompiler -m64 -g -G
 
 GCC_OPTS=-O3 -Wall -Wextra -m64
 
@@ -20,7 +22,7 @@ override TESTING = -DCACHECWLUT
 endif
 
 pavle: $(OBJ) 
-	$(NVCC) $(TESTING) $(CACHECWLUT) $(NVCC_OPTS) $(OBJ) -o $(EXE) 
+	$(NVCC) $(CUDA_CUDART_FLAGS) $(TESTING) $(CACHECWLUT) $(NVCC_OPTS) $(OBJ) -o $(EXE)
 
 vlc_kernel_sm64huff.o: vlc_kernel_sm64huff.cu 
 	$(NVCC) $(TESTING) -c vlc_kernel_sm64huff.cu $(NVCC_OPTS)

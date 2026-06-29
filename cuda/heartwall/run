@@ -1,1 +1,1 @@
-./heartwall ../../data/heartwall/test.avi 20
+./heartwall ../../data/heartwall/test.avi 20 --verify-reference ../../data/heartwall/cuda_test_20.reference

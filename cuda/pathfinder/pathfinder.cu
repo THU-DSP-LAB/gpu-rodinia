@@ -2,6 +2,10 @@
 #include <stdlib.h>
 #include <time.h>
 #include <assert.h>
+#include <errno.h>
+#include <limits.h>
+#include <string.h>
+#include "../../common/rodinia_verify.h"
 
 #ifdef TIMING
 #include "timing.h"
@@ -24,7 +28,7 @@ float init_time = 0, mem_alloc_time = 0, h2d_time = 0, kernel_time = 0,
 
 //#define BENCH_PRINT
 
-void run(int argc, char** argv);
+int run(int argc, char** argv);
 
 int rows, cols;
 int* data;
@@ -33,17 +37,56 @@ int* result;
 #define M_SEED 9
 int pyramid_height;
 
-void
-init(int argc, char** argv)
+static void usage(const char *program)
 {
-	if(argc==4){
-		cols = atoi(argv[1]);
-		rows = atoi(argv[2]);
-                pyramid_height=atoi(argv[3]);
-	}else{
-                printf("Usage: dynproc row_len col_len pyramid_height\n");
-                exit(0);
+        fprintf(stderr, "Usage: %s <cols> <rows> <pyramid_height> [--verify-cpu]\n", program);
+}
+
+static int parse_positive_int(const char *text, const char *name, int *value)
+{
+        char *end = NULL;
+        errno = 0;
+        long parsed = strtol(text, &end, 10);
+        if (errno != 0 || end == text || *end != '\0' || parsed <= 0 || parsed > INT_MAX) {
+                fprintf(stderr, "Invalid %s: %s\n", name, text);
+                return -1;
         }
+        *value = (int)parsed;
+        return 0;
+}
+
+static int parse_options(int argc, char** argv, int *verify_cpu)
+{
+	if(argc < 4){
+                usage(argv[0]);
+                return -1;
+        }
+        if (parse_positive_int(argv[1], "cols", &cols) != 0 ||
+            parse_positive_int(argv[2], "rows", &rows) != 0 ||
+            parse_positive_int(argv[3], "pyramid_height", &pyramid_height) != 0) {
+                usage(argv[0]);
+                return -1;
+        }
+        if (pyramid_height * HALO * 2 >= BLOCK_SIZE) {
+                fprintf(stderr, "pyramid_height is too large for block size %d\n", BLOCK_SIZE);
+                return -1;
+        }
+        *verify_cpu = 0;
+        for (int arg = 4; arg < argc; arg++) {
+                if (strcmp(argv[arg], "--verify-cpu") == 0) {
+                        *verify_cpu = 1;
+                        continue;
+                }
+                fprintf(stderr, "Unknown option: %s\n", argv[arg]);
+                usage(argv[0]);
+                return -1;
+        }
+        return 0;
+}
+
+void
+init(void)
+{
 	data = new int[rows*cols];
 	wall = new int*[rows];
 	for(int n=0; n<rows; n++)
@@ -82,6 +125,50 @@ fatal(char *s)
 #define IN_RANGE(x, min, max)   ((x)>=(min) && (x)<=(max))
 #define CLAMP_RANGE(x, min, max) x = (x<(min)) ? min : ((x>(max)) ? max : x )
 #define MIN(a, b) ((a)<=(b) ? (a) : (b))
+
+static int verify_cpu_reference(const int *actual)
+{
+        int *previous = (int *)malloc(sizeof(int) * cols);
+        int *current = (int *)malloc(sizeof(int) * cols);
+        if (previous == NULL || current == NULL) {
+                fprintf(stderr, "Cannot allocate Pathfinder CPU reference buffers\n");
+                free(previous);
+                free(current);
+                return -1;
+        }
+
+        memcpy(previous, data, sizeof(int) * cols);
+        for (int row = 1; row < rows; row++) {
+                int *wall_row = data + row * cols;
+                for (int col = 0; col < cols; col++) {
+                        int left = col == 0 ? previous[col] : previous[col - 1];
+                        int up = previous[col];
+                        int right = col == cols - 1 ? previous[col] : previous[col + 1];
+                        int shortest = MIN(MIN(left, up), right);
+                        current[col] = wall_row[col] + shortest;
+                }
+                int *temp = previous;
+                previous = current;
+                current = temp;
+        }
+
+        for (int col = 0; col < cols; col++) {
+                if (actual[col] != previous[col]) {
+                        fprintf(stderr,
+                                "Pathfinder CPU reference mismatch at column %d: actual=%d expected=%d\n",
+                                col,
+                                actual[col],
+                                previous[col]);
+                        free(previous);
+                        free(current);
+                        return -1;
+                }
+        }
+
+        free(previous);
+        free(current);
+        return rodinia_print_pass("Pathfinder CPU reference verification");
+}
 
 __global__ void dynproc_kernel(
                 int iteration, 
@@ -196,14 +283,16 @@ int main(int argc, char** argv)
     cudaGetDeviceCount(&num_devices);
     if (num_devices > 1) cudaSetDevice(DEVICE);
 
-    run(argc,argv);
-
-    return EXIT_SUCCESS;
+    return run(argc,argv);
 }
 
-void run(int argc, char** argv)
+int run(int argc, char** argv)
 {
-    init(argc, argv);
+    int verify_cpu;
+    if (parse_options(argc, argv, &verify_cpu) != 0) {
+        return EXIT_FAILURE;
+    }
+    init();
 
     /* --------------- pyramid parameters --------------- */
     int borderCols = (pyramid_height)*HALO;
@@ -236,6 +325,11 @@ void run(int argc, char** argv)
 #endif
 
     cudaMemcpy(result, gpuResult[final_ret], sizeof(int)*cols, cudaMemcpyDeviceToHost);
+    int status = EXIT_SUCCESS;
+    if (verify_cpu && verify_cpu_reference(result) != 0) {
+        rodinia_print_fail("Pathfinder CPU reference verification");
+        status = EXIT_FAILURE;
+    }
 
 #ifdef BENCH_PRINT
     for (int i = 0; i < cols; i++)
@@ -257,5 +351,5 @@ void run(int argc, char** argv)
 #ifdef  TIMING
     printf("Exec: %f\n", kernel_time);
 #endif
+    return status;
 }
-

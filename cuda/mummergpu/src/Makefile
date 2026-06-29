@@ -38,7 +38,7 @@ BINNAME    ?= mummergpu
 INCLUDES  += -I. -I$(CUDA_INSTALL_PATH)/include 
 
 # Libs
-LIB       := -L$(CUDA_LIB_DIR) -L$(LIBDIR) -lcuda -lcudart -lGL -lGLU ${LIB}
+LIB       := -L$(CUDA_LIB_DIR) -L$(LIBDIR) -lcudart -lcuda ${LIB}
 
 # Warning flags
 CXXWARN_FLAGS := \
@@ -64,13 +64,15 @@ CWARN_FLAGS := $(CXXWARN_FLAGS) \
 	-Wmain \
 
 # Compiler-specific flags
-NVCCFLAGS := -Xcompiler "-m64"
+NVCCFLAGS := -Xcompiler "-m64" $(CUDA_GENCODE_FLAGS)
 CXXFLAGS  := -m64 $(CXXWARN_FLAGS)
 CFLAGS    := -m64 $(CWARN_FLAGS)
 
 # Common flags
 COMMONFLAGS ?= 
 COMMONFLAGS += $(INCLUDES) -DUNIX
+MUMMERGPU_CONFIG_FLAGS ?= -DQRYTEX=0 -DREFTEX=0 -DTREETEX=0 -DMERGETEX=0 -DREORDER_REF=0 -DREORDER_TREE=0 -DRENUMBER_TREE=0
+COMMONFLAGS += $(MUMMERGPU_CONFIG_FLAGS)
 
 # Debug/release configuration
 ifeq ($(dbg),1)
@@ -172,4 +174,3 @@ mummergpu: $(BINDIR)/mummergpu
 cubin: mummergpu.cubin
 
 ptx: mummergpu.ptx
-

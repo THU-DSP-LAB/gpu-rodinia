@@ -2101,6 +2101,115 @@ char output_buf[output_buf_limit];
 
 //FIXME: needs to be reinitialized to zero at the beginning of each round of printing.
 size_t bytes_written = 0;
+static const unsigned long long fnv_offset_basis = 1469598103934665603ULL;
+static const unsigned long long fnv_prime = 1099511628211ULL;
+static MummerGpuOutputSummary output_summary = {fnv_offset_basis, 0, 0, 0};
+static FILE* output_file = NULL;
+static bool output_at_line_start = true;
+static bool output_header_candidate = false;
+static bool suppress_stdout_output = false;
+
+static void updateOutputSummary(const char* data, size_t len)
+{
+	for (size_t index = 0; index < len; ++index)
+	{
+		unsigned char byte = (unsigned char)data[index];
+		output_summary.hash ^= byte;
+		output_summary.hash *= fnv_prime;
+		output_summary.bytes++;
+		if (output_header_candidate)
+		{
+			if (byte == ' ')
+			{
+				output_summary.headers++;
+			}
+			output_header_candidate = false;
+		}
+		else if (output_at_line_start && byte == '>')
+		{
+			output_header_candidate = true;
+		}
+		output_at_line_start = byte == '\n';
+		if (output_at_line_start)
+		{
+			output_summary.lines++;
+		}
+	}
+}
+
+static void writeOutputBytes(const char* data, size_t len)
+{
+	if (len == 0)
+	{
+		return;
+	}
+	updateOutputSummary(data, len);
+	if (!suppress_stdout_output && fwrite(data, 1, len, stdout) != len)
+	{
+		fprintf(stderr, "Failed to write mummergpu output to stdout\n");
+		exit(EXIT_FAILURE);
+	}
+	if (output_file && fwrite(data, 1, len, output_file) != len)
+	{
+		fprintf(stderr, "Failed to write mummergpu output file\n");
+		exit(EXIT_FAILURE);
+	}
+}
+
+void resetMummerGpuOutputSummary()
+{
+	output_summary.hash = fnv_offset_basis;
+	output_summary.bytes = 0;
+	output_summary.lines = 0;
+	output_summary.headers = 0;
+	output_at_line_start = true;
+	output_header_candidate = false;
+	bytes_written = 0;
+}
+
+void getMummerGpuOutputSummary(MummerGpuOutputSummary* summary)
+{
+	if (!summary)
+	{
+		return;
+	}
+	*summary = output_summary;
+}
+
+int setMummerGpuOutputFile(const char* path)
+{
+	if (!path)
+	{
+		return 0;
+	}
+	closeMummerGpuOutputFile();
+	output_file = fopen(path, "wb");
+	if (!output_file)
+	{
+		fprintf(stderr, "Cannot open mummergpu output file: %s\n", path);
+		return 1;
+	}
+	return 0;
+}
+
+void setMummerGpuSuppressStdout(int suppress)
+{
+	suppress_stdout_output = suppress != 0;
+}
+
+void closeMummerGpuOutputFile()
+{
+	if (!output_file)
+	{
+		return;
+	}
+	if (fclose(output_file) != 0)
+	{
+		fprintf(stderr, "Failed to close mummergpu output file\n");
+		exit(EXIT_FAILURE);
+	}
+	output_file = NULL;
+}
 
 int addToBuffer(char* string)
 {
@@ -2111,7 +2220,7 @@ int addToBuffer(char* string)
 		size_t chunk = (output_buf_limit - bytes_written - 1);
 		strncpy(output_buf + bytes_written, string, chunk);
 		output_buf[bytes_written + chunk] = 0;
-		printf("%s", output_buf);
+		writeOutputBytes(output_buf, bytes_written + chunk);
 		//memset(output_buf, 0, sizeof(output_buf));
 		strncpy(output_buf, string + chunk, buf_length - chunk);
 		bytes_written = buf_length - chunk;
@@ -2129,7 +2238,7 @@ void flushOutput()
    if (bytes_written)
    {
 	  output_buf[bytes_written] = 0;
-	  printf("%s", output_buf);
+	  writeOutputBytes(output_buf, bytes_written);
 	  bytes_written  = 0;
    }
 	//memset(output_buf, 0, sizeof(output_buf));

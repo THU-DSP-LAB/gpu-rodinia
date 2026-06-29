@@ -95,7 +95,11 @@ main ( int argc, char *argv[] )
   if (do_verify){
     printf("Before LUD\n");
     print_matrix(m, matrix_dim);
-    matrix_duplicate(m, &mm, matrix_dim);
+    if (matrix_duplicate(m, &mm, matrix_dim) != RET_SUCCESS) {
+      fprintf(stderr, "Cannot duplicate matrix for LUD verification\n");
+      free(m);
+      exit(EXIT_FAILURE);
+    }
   }
 
   stopwatch_start(&sw);
@@ -107,7 +111,11 @@ main ( int argc, char *argv[] )
     printf("After LUD\n");
     print_matrix(m, matrix_dim);
     printf(">>>Verify<<<<\n");
-    lud_verify(mm, m, matrix_dim); 
+    if (lud_verify(mm, m, matrix_dim) != RET_SUCCESS) {
+      free(mm);
+      free(m);
+      exit(EXIT_FAILURE);
+    }
     free(mm);
   }
 

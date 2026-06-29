@@ -74,9 +74,9 @@ void write(	char* filename,
 //	READ FUNCTION
 //========================================================================================================================
 
-void read(	char* filename,
+int read(	const char* filename,
 					fp* input,
-					int data_rows, 
+					int data_rows,
 					int data_cols,
 					int major){
 
@@ -94,8 +94,8 @@ void read(	char* filename,
 
 	fid = fopen(filename, "r");
 	if( fid == NULL ){
-		printf( "The file was not opened for reading\n" );
-		return;
+		printf( "ERROR: file was not opened for reading: %s\n", filename );
+		return -1;
 	}
 
 	//=====================================================================
@@ -105,7 +105,11 @@ void read(	char* filename,
 	if(major==0){																// if matrix is saved row major in memory (C)
 		for(i=0; i<data_rows; i++){
 			for(j=0; j<data_cols; j++){
-				fscanf(fid, "%f", &temp);
+				if(fscanf(fid, "%f", &temp) != 1){
+					printf("ERROR: expected %d values in %s, failed at row %d col %d\n", data_rows*data_cols, filename, i, j);
+					fclose(fid);
+					return -1;
+				}
 				input[i*data_cols+j] = (fp)temp;
 			}
 		}
@@ -113,7 +117,11 @@ void read(	char* filename,
 	else{																				// if matrix is saved column major in memory (MATLAB)
 		for(i=0; i<data_rows; i++){
 			for(j=0; j<data_cols; j++){
-				fscanf(fid, "%f", &temp);
+				if(fscanf(fid, "%f", &temp) != 1){
+					printf("ERROR: expected %d values in %s, failed at row %d col %d\n", data_rows*data_cols, filename, i, j);
+					fclose(fid);
+					return -1;
+				}
 				input[j*data_rows+i] = (fp)temp;
 			}
 		}
@@ -124,5 +132,6 @@ void read(	char* filename,
 	//=====================================================================
 
 	fclose(fid);
+	return 0;
 
 }

@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <time.h>
 #include <assert.h>
+#include <math.h>
+#include <string.h>
+#include "../../common/rodinia_verify.h"
 
 #ifdef RD_WG_SIZE_0_0                                                            
         #define BLOCK_SIZE RD_WG_SIZE_0_0                                        
@@ -31,7 +34,10 @@ float chip_width = 0.016;
 /* ambient temperature, assuming no package at all	*/
 float amb_temp = 80.0;
 
-void run(int argc, char** argv);
+#define HOTSPOT_ABS_TOLERANCE 0.001f
+#define HOTSPOT_REL_TOLERANCE 0.00001f
+
+int run(int argc, char** argv);
 
 /* define timer macros */
 #define pin_stats_reset()   startCycle()
@@ -219,7 +225,7 @@ __global__ void calculate_temp(int iteration,  //number of iteration
 */
 
 int compute_tran_temp(float *MatrixPower,float *MatrixTemp[2], int col, int row, \
-		int total_iterations, int num_iterations, int blockCols, int blockRows, int borderCols, int borderRows) 
+		int total_iterations, int num_iterations, int blockCols, int blockRows, int borderCols, int borderRows)
 {
         dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
         dim3 dimGrid(blockCols, blockRows);  
@@ -250,9 +256,83 @@ int compute_tran_temp(float *MatrixPower,float *MatrixTemp[2], int col, int row,
         return dst;
 }
 
+int verify_cpu_reference(
+	float *actual,
+	float *initial_temp,
+	float *power,
+	int grid_rows,
+	int grid_cols,
+	int total_iterations)
+{
+	int size = grid_rows * grid_cols;
+	float *previous = (float *)malloc(size * sizeof(float));
+	float *current = (float *)malloc(size * sizeof(float));
+	if (previous == NULL || current == NULL) {
+		fprintf(stderr, "Cannot allocate HotSpot CPU reference buffers\n");
+		free(previous);
+		free(current);
+		return -1;
+	}
+	memcpy(previous, initial_temp, size * sizeof(float));
+
+	float grid_height = chip_height / grid_rows;
+	float grid_width = chip_width / grid_cols;
+	float Cap = FACTOR_CHIP * SPEC_HEAT_SI * t_chip * grid_width * grid_height;
+	float Rx = grid_width / (2.0f * K_SI * t_chip * grid_height);
+	float Ry = grid_height / (2.0f * K_SI * t_chip * grid_width);
+	float Rz = t_chip / (K_SI * grid_height * grid_width);
+	float max_slope = MAX_PD / (FACTOR_CHIP * t_chip * SPEC_HEAT_SI);
+	float step = PRECISION / max_slope;
+	float step_div_Cap = step / Cap;
+	float Rx_1 = 1.0f / Rx;
+	float Ry_1 = 1.0f / Ry;
+	float Rz_1 = 1.0f / Rz;
+
+	for (int iteration = 0; iteration < total_iterations; iteration++) {
+		for (int row = 0; row < grid_rows; row++) {
+			int north = row == 0 ? row : row - 1;
+			int south = row == grid_rows - 1 ? row : row + 1;
+			for (int col = 0; col < grid_cols; col++) {
+				int west = col == 0 ? col : col - 1;
+				int east = col == grid_cols - 1 ? col : col + 1;
+				int index = row * grid_cols + col;
+				float center = previous[index];
+				current[index] = center + step_div_Cap * (power[index] +
+					(previous[south * grid_cols + col] + previous[north * grid_cols + col] - 2.0f * center) * Ry_1 +
+					(previous[row * grid_cols + east] + previous[row * grid_cols + west] - 2.0f * center) * Rx_1 +
+					(amb_temp - center) * Rz_1);
+			}
+		}
+		float *temp = previous;
+		previous = current;
+		current = temp;
+	}
+
+	for (int index = 0; index < size; index++) {
+		float diff = fabsf(actual[index] - previous[index]);
+		float tolerance = HOTSPOT_ABS_TOLERANCE + HOTSPOT_REL_TOLERANCE * fabsf(previous[index]);
+		if (diff > tolerance) {
+			fprintf(stderr,
+				"HotSpot CPU reference mismatch at index %d: actual=%g expected=%g diff=%g tolerance=%g\n",
+				index,
+				actual[index],
+				previous[index],
+				diff,
+				tolerance);
+			free(previous);
+			free(current);
+			return -1;
+		}
+	}
+
+	free(previous);
+	free(current);
+	return rodinia_print_pass("HotSpot CPU reference verification");
+}
+
 void usage(int argc, char **argv)
 {
-	fprintf(stderr, "Usage: %s <grid_rows/grid_cols> <pyramid_height> <sim_time> <temp_file> <power_file> <output_file>\n", argv[0]);
+	fprintf(stderr, "Usage: %s <grid_rows/grid_cols> <pyramid_height> <sim_time> <temp_file> <power_file> <output_file> [--verify-cpu]\n", argv[0]);
 	fprintf(stderr, "\t<grid_rows/grid_cols>  - number of rows/cols in the grid (positive integer)\n");
 	fprintf(stderr, "\t<pyramid_height> - pyramid heigh(positive integer)\n");
 	fprintf(stderr, "\t<sim_time>   - number of iterations\n");
@@ -266,22 +346,22 @@ int main(int argc, char** argv)
 {
   printf("WG size of kernel = %d X %d\n", BLOCK_SIZE, BLOCK_SIZE);
 
-    run(argc,argv);
-
-    return EXIT_SUCCESS;
+    return run(argc,argv);
 }
 
-void run(int argc, char** argv)
+int run(int argc, char** argv)
 {
     int size;
     int grid_rows,grid_cols;
-    float *FilesavingTemp,*FilesavingPower,*MatrixOut; 
+    float *FilesavingTemp,*FilesavingPower,*MatrixOut;
     char *tfile, *pfile, *ofile;
-    
+    int verify_cpu = 0;
+    int status = EXIT_SUCCESS;
+
     int total_iterations = 60;
     int pyramid_height = 1; // number of iterations
-	
-	if (argc != 7)
+
+	if (argc != 7 && argc != 8)
 		usage(argc, argv);
 	if((grid_rows = atoi(argv[1]))<=0||
 	   (grid_cols = atoi(argv[1]))<=0||
@@ -292,6 +372,13 @@ void run(int argc, char** argv)
 	tfile=argv[4];
     pfile=argv[5];
     ofile=argv[6];
+    if (argc == 8) {
+        if (strcmp(argv[7], "--verify-cpu") != 0) {
+            fprintf(stderr, "Unknown option: %s\n", argv[7]);
+            usage(argc, argv);
+        }
+        verify_cpu = 1;
+    }
 	
     size=grid_rows*grid_cols;
 
@@ -327,8 +414,12 @@ void run(int argc, char** argv)
     printf("Start computing the transient temperature\n");
     int ret = compute_tran_temp(MatrixPower,MatrixTemp,grid_cols,grid_rows, \
 	 total_iterations,pyramid_height, blockCols, blockRows, borderCols, borderRows);
-	printf("Ending simulation\n");
+    printf("Ending simulation\n");
     cudaMemcpy(MatrixOut, MatrixTemp[ret], sizeof(float)*size, cudaMemcpyDeviceToHost);
+    if (verify_cpu && verify_cpu_reference(MatrixOut, FilesavingTemp, FilesavingPower, grid_rows, grid_cols, total_iterations) != 0) {
+        rodinia_print_fail("HotSpot CPU reference verification");
+        status = EXIT_FAILURE;
+    }
 
     writeoutput(MatrixOut,grid_rows, grid_cols, ofile);
 
@@ -336,4 +427,7 @@ void run(int argc, char** argv)
     cudaFree(MatrixTemp[0]);
     cudaFree(MatrixTemp[1]);
     free(MatrixOut);
+    free(FilesavingPower);
+    free(FilesavingTemp);
+    return status;
 }
