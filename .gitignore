@@ -1,30 +1,5 @@
 data/*
 !data/.gitkeep
-!data/backprop/
-!data/backprop/*.reference
-!data/bfs/
-!data/bfs/graph65536.reference
-!data/bfs/graph65536.txt
-!data/dwt2d/
-data/dwt2d/*
-!data/dwt2d/cuda_*.reference
-!data/heartwall/
-data/heartwall/*
-!data/heartwall/cuda_*.reference
-!data/leukocyte/
-data/leukocyte/*
-!data/leukocyte/cuda_*.reference
-!data/mummergpu/
-data/mummergpu/*
-!data/mummergpu/*.reference
-!data/myocyte/
-data/myocyte/*
-!data/myocyte/params.txt
-!data/myocyte/y.txt
-!data/myocyte/*.reference
-!data/particlefilter/
-data/particlefilter/*
-!data/particlefilter/cuda_*.reference
 
 *.o
 *.a
@@ -81,3 +56,5 @@ cuda/pathfinder/pathfinder
 cuda/srad/srad_v1/srad
 cuda/srad/srad_v2/srad
 cuda/streamcluster/sc_gpu
+
+rodinia_data.tar.xz
