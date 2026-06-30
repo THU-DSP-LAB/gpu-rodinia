@@ -345,7 +345,7 @@ __device__ void kernel_cam(	fp timeinst,
 	d_finavalu[offset_15] = dCa4CaMCa4CaN;
 
 	// write to global variables for adjusting Ca buffering in EC coupling model
-	d_finavalu[com_offset] = 1e-3*(2*CaMKIItot*(rcnCKtt2-rcnCKb2b) - 2*(rcn02+rcn24+rcn02B+rcn24B+rcnCa4CaN+rcn02CaN+rcn24CaN)); // [uM/msec]
+	d_com[com_offset] = 1e-3*(2*CaMKIItot*(rcnCKtt2-rcnCKb2b) - 2*(rcn02+rcn24+rcn02B+rcn24B+rcnCa4CaN+rcn02CaN+rcn24CaN)); // [uM/msec]
 	//d_finavalu[JCa] = 1; // [uM/msec]
-	
+
 }
