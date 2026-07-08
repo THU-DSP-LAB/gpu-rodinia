@@ -66,5 +66,6 @@ float squash(float x);
 extern int platform_id_inuse;
 extern int device_id_inuse;
 extern cl_device_type device_type;
+extern unsigned long long backprop_last_input_hidden_hash;
 
 #endif

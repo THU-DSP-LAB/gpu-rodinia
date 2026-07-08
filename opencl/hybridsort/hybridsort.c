@@ -55,6 +55,9 @@ int compare(const void *a, const void *b) {
 	else return 0;
 }
 
+static int run_validate = 0;
+static char validate_output_file[160] = "hybridoutput.txt";
+
 ////////////////////////////////////////////////////////////////////////////////
 cl_float4*runMergeSort(int listsize, int divisions,
                                cl_float4 *d_origList, cl_float4 *d_resultList,
@@ -85,6 +88,20 @@ void clCmdParams(int argc, char* argv[]) {
 			break;
 		default:
 			;
+		}
+	}
+
+	for (int i = 0; i < argc; ++i) {
+		if (strcmp(argv[i], "--validate") == 0) {
+			run_validate = 1;
+		}
+		else if (strcmp(argv[i], "--validate-output") == 0) {
+			if (i + 1 < argc) {
+				strncpy(validate_output_file, argv[i+1], sizeof(validate_output_file)-1);
+				validate_output_file[sizeof(validate_output_file)-1] = '\0';
+				run_validate = 1;
+				i++;
+			}
 		}
 	}
 }
@@ -274,14 +291,15 @@ int main(int argc, char** argv)
 #endif
     
 #ifdef OUTPUT
-    FILE *tp1;
-    const char filename3[]="./hybridoutput.txt";
-    tp1 = fopen(filename3,"w");
-    for(int i = 0; i < SIZE; i++) {
-        fprintf(tp1,"%f ",cpu_idata[i]);
-    }
+    if (run_validate) {
+        FILE *tp1;
+        tp1 = fopen(validate_output_file,"w");
+        for(int i = 0; i < numElements; i++) {
+            fprintf(tp1,"%f ",gpu_odata[i]);
+        }
     
-    fclose(tp1);
+        fclose(tp1);
+    }
 #endif
     
 
@@ -292,6 +310,5 @@ int main(int argc, char** argv)
 //    printf("%d \n", summy);
     return 0;
 }
-
 
 

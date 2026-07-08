@@ -15,7 +15,7 @@ endif
 #C compiler
 CC = g++
 
-FLAGS = -O3
+FLAGS = -O3 -std=gnu++03
 SRC = euler3d.cpp ../util/timing.c
 
 EXE = euler3d.out

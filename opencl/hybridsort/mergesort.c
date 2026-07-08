@@ -24,14 +24,14 @@
 #define MAX_SOURCE_SIZE (0x100000)
 
 
-cl_device_id device_id;             // compute device id
+static cl_device_id device_id;             // compute device id
 cl_context mergeContext;                 // compute context
 cl_command_queue mergeCommands;
 cl_program mergeProgram;                 // compute program
 cl_kernel mergeFirstKernel;                   // compute kernel
 cl_kernel mergePassKernel;
 cl_kernel mergePackKernel;
-cl_int err;
+static cl_int err;
 cl_mem d_resultList_first_buff;
 cl_mem d_origList_first_buff;
 cl_mem constStartAddr;

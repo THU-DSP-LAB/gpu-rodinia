@@ -1,4 +1,5 @@
 #!/bin/bash
 
-export DATA_DIR=/home/hyu/Projects/gpu-rodinia/data
+: "${DATA_DIR:=$(cd "$(dirname "${BASH_SOURCE[0]}")"/../../data && pwd)}"
+export DATA_DIR
 ./nn.out filelist.txt -r 50 -lat 30 -lng 90 -q -t -f ${DATA_DIR} $@

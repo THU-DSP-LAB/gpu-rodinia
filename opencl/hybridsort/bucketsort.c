@@ -72,7 +72,7 @@ cl_mem d_prefixoffsets_input_buff;
 unsigned int *l_offsets = NULL;
 cl_mem l_offsets_buff;
 unsigned int *d_Result1024;
-cl_device_id device_id;            // compute device id
+static cl_device_id device_id;            // compute device id
 cl_context bucketContext;                 // compute context
 cl_context histoContext;
 cl_command_queue bucketCommands;          // compute command queue
@@ -86,7 +86,7 @@ cl_kernel bucketsortKernel;
 cl_mem histoInput;
 cl_mem histoOutput;
 cl_mem bucketOutput;
-cl_int err;
+static cl_int err;
 cl_uint num_platforms;
 cl_event histoEvent;
 cl_event bucketCountEvent;

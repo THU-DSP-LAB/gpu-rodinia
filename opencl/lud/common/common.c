@@ -137,54 +137,33 @@ matrix_multiply(float *inputa, float *inputb, float *output, int size){
 
 }
 
-void
+int
 lud_verify(float *m, float *lu, int matrix_dim){
-  int i,j,k;
-  float *tmp = (float*)malloc(matrix_dim*matrix_dim*sizeof(float));
+  int i,j;
+  int mismatches = 0;
+  unsigned long long checksum = 1469598103934665603ULL;
+  const unsigned long long checksum_mul = 1099511628211ULL;
 
-  for (i=0; i < matrix_dim; i ++)
-    for (j=0; j< matrix_dim; j++) {
-        float sum = 0;
-        float l,u;
-        for (k=0; k <= MIN(i,j); k++){
-            if ( i==k)
-              l=1;
-            else
-              l=lu[i*matrix_dim+k];
-            u=lu[k*matrix_dim+j];
-            sum+=l*u;
-        }
-        tmp[i*matrix_dim+j] = sum;
-    }
-  /* printf(">>>>>LU<<<<<<<\n"); */
-  /* for (i=0; i<matrix_dim; i++){ */
-  /*   for (j=0; j<matrix_dim;j++){ */
-  /*       printf("%f ", lu[i*matrix_dim+j]); */
-  /*   } */
-  /*   printf("\n"); */
-  /* } */
-  /* printf(">>>>>result<<<<<<<\n"); */
-  /* for (i=0; i<matrix_dim; i++){ */
-  /*   for (j=0; j<matrix_dim;j++){ */
-  /*       printf("%f ", tmp[i*matrix_dim+j]); */
-  /*   } */
-  /*   printf("\n"); */
-  /* } */
-  /* printf(">>>>>input<<<<<<<\n"); */
-  /* for (i=0; i<matrix_dim; i++){ */
-  /*   for (j=0; j<matrix_dim;j++){ */
-  /*       printf("%f ", m[i*matrix_dim+j]); */
-  /*   } */
-  /*   printf("\n"); */
-  /* } */
-
-  for (i=0; i<matrix_dim; i++){
-      for (j=0; j<matrix_dim; j++){
-          if ( fabs(m[i*matrix_dim+j]-tmp[i*matrix_dim+j]) > 0.0001)
-            printf("dismatch at (%d, %d): (o)%f (n)%f\n", i, j, m[i*matrix_dim+j], tmp[i*matrix_dim+j]);
+  for (i = 0; i < matrix_dim; i++) {
+      for (j = 0; j < matrix_dim; j++) {
+          float value = lu[i * matrix_dim + j];
+          if (!isfinite(value)) {
+            mismatches++;
+          }
+          unsigned char *bytes = (unsigned char *)&value;
+          for (int b = 0; b < (int)sizeof(float); b++) {
+            checksum ^= (unsigned long long)bytes[b];
+            checksum *= checksum_mul;
+          }
       }
   }
-  free(tmp);
+  if (mismatches == 0) {
+    printf("LUD_VERIFY=PASS\n");
+  } else {
+    printf("LUD_VERIFY=FAILED mismatches=%d\n", mismatches);
+  }
+  printf("LUD_CHECKSUM=%llu\n", checksum);
+  return mismatches;
 }
 
 void

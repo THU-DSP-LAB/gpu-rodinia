@@ -16,7 +16,7 @@
 #include <assert.h>
 #include <iostream>
 #include "OpenCL.h"
-#include "timing.h"
+#include "../util/timing.h"
 
 using namespace std;
 
@@ -33,11 +33,13 @@ using namespace std;
 // Program variables.
 int   rows = -1, cols = -1;
 int   Ne = rows * cols;
-int*  data;
+int*  pathfinder_data;
 int** wall;
 int*  result;
 int   pyramid_height = -1;
 int   verbose = 0;
+int   write_validate = 0;
+char validate_file[160] = "pathfinder_result.txt";
 
 // OCL config
 int platform_id_inuse = 0;            // platform id in use (default: 0)
@@ -79,7 +81,18 @@ void init(int argc, char** argv)
             }
         }
         if (strcmp(argv[cur_arg], "-v") == 0) {
-			verbose = 1;
+            verbose = 1;
+        }
+        if (strcmp(argv[cur_arg], "--validate") == 0) {
+            write_validate = 1;
+        }
+        else if (strcmp(argv[cur_arg], "--validate-output") == 0) {
+            if (argc >= cur_arg + 2) {
+                strncpy(validate_file, argv[cur_arg+1], sizeof(validate_file)-1);
+                validate_file[sizeof(validate_file)-1] = '\0';
+                write_validate = 1;
+                cur_arg++;
+            }
         }
         else if (strcmp(argv[cur_arg], "-p") == 0) {
             if (argc >= cur_arg + 1) {
@@ -100,12 +113,12 @@ void init(int argc, char** argv)
         fprintf(stderr, "usage: %s <-r rows> <-c cols> <-h pyramid_height> [-v] [-p platform_id] [-d device_id] [-t device_type]\n", argv[0]);
 		exit(0);
 	}
-	data = new int[rows * cols];
+	pathfinder_data = new int[rows * cols];
 	wall = new int*[rows];
 	for (int n = 0; n < rows; n++)
 	{
 		// wall[n] is set to be the nth row of the data array.
-		wall[n] = data + cols * n;
+		wall[n] = pathfinder_data + cols * n;
 	}
 	result = new int[cols];
 
@@ -202,10 +215,10 @@ int main(int argc, char** argv)
 
     cl_event write_event[3];
     clEnqueueWriteBuffer(cl.q(), d_gpuWall, 1, 0,
-        sizeof(cl_int) * (size - cols), (data + cols), 0, 0, &write_event[0]);
+        sizeof(cl_int) * (size - cols), (pathfinder_data + cols), 0, 0, &write_event[0]);
 
     clEnqueueWriteBuffer(cl.q(), d_gpuResult[0], 1, 0,
-        sizeof(cl_int) * cols, data, 0, 0, &write_event[1]);
+        sizeof(cl_int) * cols, pathfinder_data, 0, 0, &write_event[1]);
 
     clEnqueueWriteBuffer(cl.q(), d_outputBuffer, 1, 0,
         sizeof(cl_int) * 16384, h_outputBuffer, 0, 0, &write_event[2]);
@@ -275,10 +288,29 @@ int main(int argc, char** argv)
 
 	// Tack a null terminator at the end of the string.
 	h_outputBuffer[16383] = '\0';
+
+	if (write_validate) {
+		FILE *fp = fopen(validate_file, "w");
+		if (fp == NULL) {
+			fprintf(stderr, "pathfinder: cannot write %s\n", validate_file);
+			exit(1);
+		}
+		unsigned long long checksum = 1469598103934665603ULL;
+		const unsigned long long checksum_mul = 1099511628211ULL;
+		for (int i = 0; i < cols; i++) {
+			fprintf(fp, "%d\n", result[i]);
+			checksum ^= (unsigned long long) result[i];
+			checksum *= checksum_mul;
+		}
+		fprintf(fp, "PATHFINDER_CHECKSUM=%llu\n", checksum);
+		fprintf(fp, "PATHFINDER_ROWS=%d\n", rows);
+		fprintf(fp, "PATHFINDER_COLS=%d\n", cols);
+		fclose(fp);
+	}
 	
 #ifdef BENCH_PRINT
 	for (int i = 0; i < cols; i++)
-		printf("%d ", data[i]);
+		printf("%d ", pathfinder_data[i]);
 	printf("\n");
 	for (int i = 0; i < cols; i++)
 		printf("%d ", result[i]);
@@ -299,7 +331,7 @@ int main(int argc, char** argv)
 #endif
 
 	// Memory cleanup here.
-	delete[] data;
+	delete[] pathfinder_data;
 	delete[] wall;
 	delete[] result;
 

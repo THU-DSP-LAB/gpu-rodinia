@@ -239,12 +239,28 @@ int main(int argc, char * argv[])
     int edge_list_size;
     FILE *fp;
     Node* h_graph_nodes;
+    char bfs_validate_file[160] = "bfs_result.txt";
+    int save_validate_result = 0;
     char *h_graph_mask, *h_updating_graph_mask, *h_graph_visited;
     try {
         char *input_f;
         if(argc < 2) {
             Usage(argc, argv);
             exit(0);
+        }
+        for (int arg_i = 1; arg_i < argc; ++arg_i) {
+            if (strcmp(argv[arg_i], "--validate") == 0) {
+                save_validate_result = 1;
+                continue;
+            }
+            if (strcmp(argv[arg_i], "--validate-output") == 0) {
+                if (arg_i + 1 < argc) {
+                    save_validate_result = 1;
+                    strncpy(bfs_validate_file, argv[++arg_i], sizeof(bfs_validate_file) - 1);
+                    bfs_validate_file[sizeof(bfs_validate_file) - 1] = '\0';
+                }
+                continue;
+            }
         }
 
         _clCmdParams(argc, argv);
@@ -331,7 +347,28 @@ int main(int argc, char * argv[])
         run_bfs_cpu(no_of_nodes,h_graph_nodes,edge_list_size,h_graph_edges, h_graph_mask, h_updating_graph_mask, h_graph_visited, h_cost_ref);
         //---------------------------------------------------------
         //--result varification
-        compare_results<int>(h_cost_ref, h_cost, no_of_nodes);
+        int bfs_passed = 1;
+        for (int i = 0; i < no_of_nodes; i++) {
+            if (h_cost_ref[i] != h_cost[i]) {
+                bfs_passed = 0;
+                break;
+            }
+        }
+        if (bfs_passed) {
+            std::cout << "--cambine:passed:-)" << std::endl;
+        } else {
+            std::cout << "--cambine: failed:-(" << std::endl;
+        }
+        if (save_validate_result) {
+            FILE *fpout = fopen(bfs_validate_file, "w");
+            if (fpout == NULL) {
+                std::cerr << "bfs: cannot write " << bfs_validate_file << std::endl;
+                return 1;
+            }
+            fprintf(fpout, "BFS_VERIFY=%s\n", bfs_passed ? "PASS" : "FAILED");
+            fprintf(fpout, "BFS_NODES=%d\n", no_of_nodes);
+            fclose(fpout);
+        }
         //release host memory
         free(h_graph_nodes);
         free(h_graph_mask);

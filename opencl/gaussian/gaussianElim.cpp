@@ -87,16 +87,19 @@ int main(int argc, char *argv[]) {
     float *a=NULL, *b=NULL, *finalVec=NULL;
     float *m=NULL;
     int size = -1;
+    int validate = 0;
     
     FILE *fp;
     
     // args
     char filename[200];
     int show_data=0,quiet=0,timing=0,platform=0,device=0;
+    char result_file[200] = "gaussian_result.txt";
     
     // parse command line
     if (parseCommandline(argc, argv, filename,
-			 &quiet, &show_data, &timing, &platform, &device, &size)) {
+				 &quiet, &show_data, &timing, &platform, &device, &size,
+                 &validate, result_file)) {
     printUsage();
     return 0;
     }
@@ -157,8 +160,10 @@ int main(int argc, char *argv[]) {
 
     // run kernels
 	ForwardSub(context,a,b,m,size,timing);
+    BackSub(a,b,finalVec,size);
 
-    if (!quiet && show_data) {
+    if (!quiet && (show_data || validate)) {
+        if (show_data) {
         printf("The result of matrix m is: \n");
 
         PrintMat(m, size, size, size);
@@ -167,9 +172,24 @@ int main(int argc, char *argv[]) {
         printf("The result of array b is: \n");
         PrintAry(b, size);
 
-        BackSub(a,b,finalVec,size);
         printf("The final solution is: \n");
         PrintAry(finalVec,size);
+        }
+    }
+
+    if (validate) {
+        FILE *result_handle = fopen(result_file, "w");
+        if (result_handle == NULL) {
+            fprintf(stderr, "gaussian: cannot write %s\n", result_file);
+            return 1;
+        }
+        double checksum = 0.0;
+        for (int i = 0; i < size; i++) {
+            checksum += finalVec[i] * (double) (i + 1);
+            fprintf(result_handle, "%0.9f\n", finalVec[i]);
+        }
+        fprintf(result_handle, "GAUSSIAN_CHECKSUM=%0.17e\n", checksum);
+        fclose(result_handle);
     }
 
     free(m);
@@ -457,12 +477,26 @@ float eventTime(cl_event event,cl_command_queue command_queue){
 
  // Ke Wang add a function to generate input internally
 int parseCommandline(int argc, char *argv[], char* filename,
-                     int *q, int *v, int *t, int *p, int *d, int *size){
+                     int *q, int *v, int *t, int *p, int *d, int *size,
+                     int *validate, char *result_file){
     int i;
     if (argc < 2) return 1; // error
     char flag;
 
     for(i=1;i<argc;i++) {
+      if (strcmp(argv[i], "--validate") == 0) {
+        *validate = 1;
+        continue;
+      }
+      if (strcmp(argv[i], "--validate-output") == 0) {
+        if (argc >= i + 2) {
+          strncpy(result_file, argv[i+1], 199);
+          result_file[199] = '\0';
+          *validate = 1;
+          i++;
+        }
+        continue;
+      }
       if (argv[i][0]=='-') {// flag
         flag = argv[i][1];
           switch (flag) {
@@ -485,6 +519,14 @@ int parseCommandline(int argc, char *argv[], char* filename,
 			case 'v': // show_data
 			  *v = 1;
 			  break;
+            case 'c': // validate and output result file
+              *validate = 1;
+              if (i + 1 < argc) {
+                  strncpy(result_file, argv[i+1], 199);
+                  result_file[199] = '\0';
+                  i++;
+              }
+              break;
             case 't': // timing
               *t = 1;
               break;
@@ -516,6 +558,7 @@ void printUsage(){
   printf("\n");
   printf("-h           Display the help file\n");
   printf("-q           Quiet mode. Suppress all text output.\n");
+  printf("-c [output]  Write validation result file (default gaussian_result.txt).\n");
   printf("-t           Print timing information.\n");
   printf("\n");
   printf("-p [int]     Choose the platform (must choose both platform and device)\n");

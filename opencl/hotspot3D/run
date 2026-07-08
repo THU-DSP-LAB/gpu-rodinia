@@ -1,6 +1,7 @@
 #!/bin/bash
 
-export DATA_DIR=/home/hyu/Projects/gpu-rodinia/data
+: "${DATA_DIR:=$(cd "$(dirname "${BASH_SOURCE[0]}")"/../../data && pwd)}"
+export DATA_DIR
 ./hotspot3D.out -n 512 -l 8 -i 500 \
   -f ${DATA_DIR}/hotspot3D/power_512x8 ${DATA_DIR}/hotspot3D/temp_512x8 output.txt \
   $@

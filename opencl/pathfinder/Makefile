@@ -17,19 +17,24 @@ DEBUGFLAGS = -g
 # You will need to modify the following 2 lines
 # by inserting the correct path to the OpenCL
 # lib and inc directories.
-CXXFLAGS = -I$(OPENCL_INC) -c $(DEBUGFLAGS)
-LINKFLAGS = -L$(OPENCL_LIB)
+CPPFLAGS = -I$(OPENCL_INC) -I../util -DTIMING -c $(DEBUGFLAGS)
+LDFLAGS = -L$(OPENCL_LIB)
 
 # link objects(binaries) together
-a.out: main.o OpenCL.o
-	$(CXX) $(LINKFLAGS) main.o OpenCL.o timing.o \
+a.out: main.o OpenCL.o timing.o
+	$(CXX) $(LDFLAGS) main.o OpenCL.o timing.o \
 		-o pathfinder.out \
-		-lOpenCL \
-	 	-I../util -DTIMING
+		-lOpenCL
 
 # compile main function file into object (binary)
-main.o: main.cpp OpenCL.cpp kernels.cl ../util/timing.c
-	$(CXX) $(CXXFLAGS) main.cpp OpenCL.cpp ../util/timing.c -I../util -DTIMING
+main.o: main.cpp OpenCL.cpp kernels.cl ../util/timing.h
+	$(CXX) $(CPPFLAGS) -o main.o main.cpp
+
+OpenCL.o: OpenCL.cpp ../util/timing.h
+	$(CXX) $(CPPFLAGS) -o OpenCL.o OpenCL.cpp
+
+timing.o: ../util/timing.c ../util/timing.h
+	$(CXX) -I../util -c -DTIMING $(DEBUGFLAGS) -o timing.o ../util/timing.c
 
 clean:
 	clear

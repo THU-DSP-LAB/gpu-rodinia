@@ -32,10 +32,13 @@ int main(int argc, char *argv[]) {
   char filename[100];
   int resultsCount=10,quiet=0,timing=0,platform=-1,device=-1;
   float lat=0.0,lng=0.0;
+  char result_file[160] = "nn_result.txt";
+  int write_result = 0;
   
   // parse command line
   if (parseCommandline(argc, argv, filename,&resultsCount,&lat,&lng,
-                     &quiet, &timing, &platform, &device)) {
+                     &quiet, &timing, &platform, &device,
+                     &write_result, result_file)) {
     printUsage();
     return 0;
   }
@@ -73,6 +76,17 @@ int main(int argc, char *argv[]) {
     for(i=0;i<resultsCount;i++) {
       printf("%s --> Distance=%f\n",records[i].recString,records[i].distance);
     }
+  if (write_result) {
+    FILE* fp = fopen(result_file, "w");
+    if (fp == NULL) {
+      fprintf(stderr, "nn: cannot write %s\n", result_file);
+      return 1;
+    }
+    for (i = 0; i < resultsCount; i++) {
+      fprintf(fp, "%s\t%0.9f\n", records[i].recString, records[i].distance);
+    }
+    fclose(fp);
+  }
   free(recordDistances);
   return 0;
 }
@@ -319,13 +333,25 @@ void findLowest(std::vector<Record> &records,float *distances,int numRecords,int
 }
 
 int parseCommandline(int argc, char *argv[], char* filename,int *r,float *lat,float *lng,
-                     int *q, int *t, int *p, int *d){
+                     int *q, int *t, int *p, int *d,
+                     int *saveResult, char *result_file){
     int i;
     if (argc < 2) return 1; // error
     strncpy(filename,argv[1],100);
     char flag;
     
     for(i=1;i<argc;i++) {
+      if (strcmp(argv[i], "--validate") == 0) {
+        *saveResult = 1;
+        continue;
+      }
+      if (strcmp(argv[i], "--validate-output") == 0 && i + 1 < argc) {
+        strncpy(result_file, argv[i+1], 159);
+        result_file[159] = '\0';
+        *saveResult = 1;
+        i++;
+        continue;
+      }
       if (argv[i][0]=='-') {// flag
         flag = argv[i][1];
           switch (flag) {
@@ -386,6 +412,8 @@ void printUsage(){
   printf("\n");
   printf("-h, --help   Display the help file\n");
   printf("-q           Quiet mode. Suppress all text output.\n");
+  printf("--validate   Write validation output file.\n");
+  printf("--validate-output [file]  Write validation output file.\n");
   printf("-t           Print timing information.\n");
   printf("\n");
   printf("-p [int]     Choose the platform (must choose both platform and device)\n");

@@ -19,7 +19,7 @@ CC = g++
 
 SRC = bfs.cpp timer.cc ../util/timing.c
 
-CC_FLAGS = -g -O3
+CC_FLAGS = -g -O3 -std=gnu++03
 
 EXE = bfs.out
 

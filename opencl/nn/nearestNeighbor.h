@@ -46,5 +46,6 @@ int loadData(char *filename,std::vector<Record> &records,std::vector<LatLong> &l
 void findLowest(std::vector<Record> &records,float *distances,int numRecords,int topN);
 void printUsage();
 int parseCommandline(int argc, char *argv[], char* filename,int *r,float *lat,float *lng,
-                     int *q, int *t, int *p, int *d);
+                     int *q, int *t, int *p, int *d,
+                     int *saveResult, char *result_file);
 #endif

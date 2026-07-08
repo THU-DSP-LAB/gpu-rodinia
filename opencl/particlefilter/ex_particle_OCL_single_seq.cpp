@@ -183,7 +183,7 @@ static int shutdown() {
     // release resources
     if (cmd_queue) clReleaseCommandQueue(cmd_queue);
     if (context) clReleaseContext(context);
-    if (device_list) delete device_list;
+    if (device_list) delete[] device_list;
 
     // reset all variables
     cmd_queue = 0;
@@ -1043,6 +1043,8 @@ int particleFilter(unsigned char * I, int IszX, int IszY, int Nfr, int * seed, i
     free(CDF);
     free(ind);
     free(u);
+
+    return 0;
 }
 
 int main(int argc, char * argv[]) {
@@ -1134,12 +1136,12 @@ int main(int argc, char * argv[]) {
     long long endVideoSequence = get_time();
     printf("VIDEO SEQUENCE TOOK %f\n", elapsed_time(start, endVideoSequence));
     //call particle filter
-    particleFilter(I, IszX, IszY, Nfr, seed, Nparticles);
+    int status = particleFilter(I, IszX, IszY, Nfr, seed, Nparticles);
     long long endParticleFilter = get_time();
     printf("PARTICLE FILTER TOOK %f\n", elapsed_time(endVideoSequence, endParticleFilter));
     printf("ENTIRE PROGRAM TOOK %f\n", elapsed_time(start, endParticleFilter));
 
     free(seed);
     free(I);
-    return 0;
+    return status;
 }

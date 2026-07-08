@@ -1,1 +1,5 @@
-./myocyte.out -time 500 -r /home/hyu/gpu-rodinia/data/myocyte
+#!/bin/bash
+
+: "${MYOCYTE_DATA:=$(cd "$(dirname "${BASH_SOURCE[0]}")"/../../data/myocyte && pwd)}"
+export MYOCYTE_DATA
+./myocyte.out -time 500 -r "$MYOCYTE_DATA" "$@"

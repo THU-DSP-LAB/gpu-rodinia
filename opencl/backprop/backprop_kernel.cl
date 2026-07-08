@@ -16,10 +16,11 @@ bpnn_layerforward_ocl(__global float *input_cuda,
 					  __local float *input_node,
 					  __local float *weight_matrix,
 					  int in,
-					  int hid) 
+					  int hid,
+					  int block_offset) 
 {
 
-   int by = get_group_id(1);
+   int by = get_group_id(1) + block_offset;
    int tx = get_local_id(0);
    int ty = get_local_id(1);
 
@@ -65,10 +66,11 @@ __kernel void  bpnn_adjust_weights_ocl( __global float * delta,
 										__global float * ly,      
 										 int in,          
 										__global float * w,       
-										__global float * oldw)  									
+										__global float * oldw,
+										int block_offset)  									
 {
    
-   int by = get_group_id(1);
+   int by = get_group_id(1) + block_offset;
    int tx = get_local_id(0);
    int ty = get_local_id(1);
 	

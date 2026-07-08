@@ -124,7 +124,7 @@ static int shutdown()
 	// release resources
 	if( cmd_queue ) clReleaseCommandQueue( cmd_queue );
 	if( context ) clReleaseContext( context );
-	if( device_list ) delete device_list;
+	if( device_list ) delete[] device_list;
 #ifdef  TIMING
 	gettimeofday(&tv_close_end, NULL);
 	tvsub(&tv_close_end, &tv_close_start, &tv);
@@ -248,6 +248,7 @@ int allocate(int n_points, int n_features, int n_clusters, float **feature)
     clReleaseEvent(event);
 
 	membership_OCL = (int*) malloc(n_points * sizeof(int));
+	return 0;
 }
 
 void deallocateMemory()
@@ -255,11 +256,32 @@ void deallocateMemory()
 #ifdef  TIMING
 	gettimeofday(&tv_close_start, NULL);
 #endif
-	clReleaseMemObject(d_feature);
-	clReleaseMemObject(d_feature_swap);
-	clReleaseMemObject(d_cluster);
-	clReleaseMemObject(d_membership);
+	if (kernel_s) {
+		clReleaseKernel(kernel_s);
+		kernel_s = 0;
+	}
+	if (kernel2) {
+		clReleaseKernel(kernel2);
+		kernel2 = 0;
+	}
+	if (d_feature) {
+		clReleaseMemObject(d_feature);
+		d_feature = 0;
+	}
+	if (d_feature_swap) {
+		clReleaseMemObject(d_feature_swap);
+		d_feature_swap = 0;
+	}
+	if (d_cluster) {
+		clReleaseMemObject(d_cluster);
+		d_cluster = 0;
+	}
+	if (d_membership) {
+		clReleaseMemObject(d_membership);
+		d_membership = 0;
+	}
 	free(membership_OCL);
+	membership_OCL = 0;
 #ifdef  TIMING
 	gettimeofday(&tv_close_end, NULL);
 	tvsub(&tv_close_end, &tv_close_start, &tv);

@@ -54,6 +54,8 @@ int blosum62[24][24] = {
 
 int platform_id_inuse = 0;            // platform id in use (default: 0)
 int device_id_inuse = 0;              // device id in use (default : 0)
+int write_traceback = 0;
+char validate_output_file[160] = "nw_result.txt";
 
 //Primitives for timing
 #ifdef TIMING
@@ -193,6 +195,18 @@ int main(int argc, char **argv){
             else if (strcmp(argv[cur_arg], "-d") == 0) {
                 if (argc >= cur_arg + 1) {
                     device_id_inuse = atoi(argv[cur_arg+1]);
+                    cur_arg++;
+                }
+            }
+            else if (strcmp(argv[cur_arg], "--traceback") == 0 ||
+                     strcmp(argv[cur_arg], "--validate") == 0) {
+                write_traceback = 1;
+            }
+            else if (strcmp(argv[cur_arg], "--validate-output") == 0) {
+                if (argc >= cur_arg + 2) {
+                    strncpy(validate_output_file, argv[cur_arg+1], sizeof(validate_output_file)-1);
+                    validate_output_file[sizeof(validate_output_file)-1] = '\0';
+                    write_traceback = 1;
                     cur_arg++;
                 }
             }
@@ -415,66 +429,26 @@ int main(int argc, char **argv){
     clReleaseEvent(event[0]);
 #endif
 
-//#define TRACEBACK	
-#ifdef TRACEBACK
-	
-	FILE *fpo = fopen("result.txt","w");
-	fprintf(fpo, "print traceback value GPU:\n");
-    
-	for (int i = max_rows - 2,  j = max_rows - 2; i>=0, j>=0;){
-		int nw, n, w, traceback;
-		if ( i == max_rows - 2 && j == max_rows - 2 )
-			fprintf(fpo, "%d ", output_itemsets[ i * max_cols + j]); //print the first element
-		if ( i == 0 && j == 0 )
-           break;
-		if ( i > 0 && j > 0 ){
-			nw = output_itemsets[(i - 1) * max_cols + j - 1];
-		    w  = output_itemsets[ i * max_cols + j - 1 ];
-            n  = output_itemsets[(i - 1) * max_cols + j];
-		}
-		else if ( i == 0 ){
-		    nw = n = LIMIT;
-		    w  = output_itemsets[ i * max_cols + j - 1 ];
-		}
-		else if ( j == 0 ){
-		    nw = w = LIMIT;
-            n  = output_itemsets[(i - 1) * max_cols + j];
-		}
-		else{
-		}
-
-		//traceback = maximum(nw, w, n);
-		int new_nw, new_w, new_n;
-		new_nw = nw + reference[i * max_cols + j];
-		new_w = w - penalty;
-		new_n = n - penalty;
-		
-		traceback = maximum(new_nw, new_w, new_n);
-		if(traceback == new_nw)
-			traceback = nw;
-		if(traceback == new_w)
-			traceback = w;
-		if(traceback == new_n)
-            traceback = n;
-			
-		fprintf(fpo, "%d ", traceback);
-
-		if(traceback == nw )
-		{i--; j--; continue;}
-
-        else if(traceback == w )
-		{j--; continue;}
-
-        else if(traceback == n )
-		{i--; continue;}
-
-		else
-		;
+	if (write_traceback) {
+        FILE *fpo = fopen(validate_output_file, "w");
+        if (fpo == NULL) {
+            fprintf(stderr, "nw: cannot write %s\n", validate_output_file);
+            return -1;
+        }
+        int corner = output_itemsets[(max_rows - 2) * max_cols + (max_cols - 2)];
+        unsigned long long checksum = 1469598103934665603ULL;
+        const unsigned long long checksum_mul = 1099511628211ULL;
+        for (int i = 0; i < max_rows; i++) {
+            for (int j = 0; j < max_cols; j++) {
+                checksum ^= (unsigned long long)(output_itemsets[i * max_cols + j]);
+                checksum *= checksum_mul;
+            }
+        }
+        fprintf(fpo, "NW_RESULT=%d\n", corner);
+        fprintf(fpo, "NW_CHECKSUM=%llu\n", checksum);
+        fprintf(fpo, "NW_TRACEBACK=1\n");
+        fclose(fpo);
 	}
-	
-	fclose(fpo);
-
-#endif
 
 #ifdef  TIMING
 	gettimeofday(&tv_close_start, NULL);
@@ -508,4 +482,3 @@ int main(int argc, char **argv){
 	free(input_itemsets);
 	free(output_itemsets);
 }
-

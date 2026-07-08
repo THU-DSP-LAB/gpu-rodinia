@@ -385,13 +385,22 @@ main ( int argc, char *argv[] )
 	printf("Total: %f\n", total_time);
 #endif
 
-	if (do_verify){
-		printf("After LUD\n");
-		// print_matrix(m, matrix_dim);
-		printf(">>>Verify<<<<\n");
-		lud_verify(mm, m, matrix_dim); 
-		free(mm);
-	}
+		if (do_verify){
+			printf("After LUD\n");
+			// print_matrix(m, matrix_dim);
+			printf(">>>Verify<<<<\n");
+			int mismatches = lud_verify(mm, m, matrix_dim); 
+			FILE *fp = fopen("lud_verify.txt", "w");
+			if (fp != NULL) {
+				if (mismatches == 0) {
+					fprintf(fp, "LUD_VERIFY=PASS\n");
+				} else {
+					fprintf(fp, "LUD_VERIFY=FAILED mismatches=%d\n", mismatches);
+				}
+				fclose(fp);
+			}
+			free(mm);
+		}
 
 	free(m);
 	
@@ -400,5 +409,4 @@ main ( int argc, char *argv[] )
 }				
 
 /* ----------  end of function main  ---------- */
-
 

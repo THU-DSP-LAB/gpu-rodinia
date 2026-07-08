@@ -1,4 +1,5 @@
 #!/bin/bash
 
-export DATA_DIR=/home/hyu/Projects/gpu-rodinia/data
+: "${DATA_DIR:=$(cd "$(dirname "${BASH_SOURCE[0]}")"/../../data && pwd)}"
+export DATA_DIR
 ./kmeans.out -o -i ${DATA_DIR}/kmeans/819200.txt $@

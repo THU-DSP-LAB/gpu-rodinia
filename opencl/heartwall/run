@@ -1,0 +1,5 @@
+#!/bin/bash
+
+: "${DATA_DIR:=$(cd "$(dirname "${BASH_SOURCE[0]}")"/../../data/heartwall && pwd)}"
+export DATA_DIR
+./heartwall.out -n 100 -f "${DATA_DIR}/test.avi" -i "${DATA_DIR}/input.txt" "$@"

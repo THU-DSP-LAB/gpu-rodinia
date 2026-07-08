@@ -303,6 +303,7 @@ void _clInit(int platform_id, int device_id)throw(string){
     oclHandles.program = NULL;
 
     cl_uint deviceListSize;
+    cl_device_id selected_device = NULL;
     //-----------------------------------------------
     //--cambine-1: find the available platforms and select one
 
@@ -392,9 +393,10 @@ void _clInit(int platform_id, int device_id)throw(string){
 	std::cout<<"--cambine: before creating context"<<std::endl;
 #endif
     cl_context_properties cprops[3] = { CL_CONTEXT_PLATFORM, (cl_context_properties)targetPlatform, 0 };
-    oclHandles.context = clCreateContext(0, 
-                                        deviceListSize, 
-                                        oclHandles.devices, 
+    selected_device = oclHandles.devices[DEVICE_ID_INUSED];
+    oclHandles.context = clCreateContext(cprops, 
+                                        1, 
+                                        &selected_device, 
                                         NULL,
 										NULL,
                                         &resultCL);
@@ -442,7 +444,7 @@ void _clInit(int platform_id, int device_id)throw(string){
     //insert debug information
     std::string options= "";
     //options += " -cl-nv-opt-level=3";
-    resultCL = clBuildProgram(oclHandles.program, deviceListSize, oclHandles.devices, options.c_str(), NULL,  NULL);
+    resultCL = clBuildProgram(oclHandles.program, 1, &selected_device, options.c_str(), NULL,  NULL);
 	
     if ((resultCL != CL_SUCCESS) || (oclHandles.program == NULL)){
         cerr << "InitCL()::Error: In clBuildProgram" << endl;

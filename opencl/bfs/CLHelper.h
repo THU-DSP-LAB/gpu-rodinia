@@ -154,6 +154,7 @@ void _clInit()
     oclHandles.program = NULL;
 
     cl_uint deviceListSize;
+    cl_device_id selected_device = NULL;
 
     //-----------------------------------------------
     //--cambine-1: find the available platforms and select one
@@ -233,8 +234,10 @@ void _clInit()
     //-----------------------------------------------
     //--cambine-2: create an OpenCL context
     cl_context_properties cprops[3] = { CL_CONTEXT_PLATFORM, (cl_context_properties)targetPlatform, 0 };
-    oclHandles.context = clCreateContextFromType(cprops,
-                         device_type,
+    selected_device = oclHandles.devices[device_id_inuse];
+    oclHandles.context = clCreateContext(cprops,
+                         1,
+                         &selected_device,
                          NULL,
                          NULL,
                          &resultCL);
@@ -274,7 +277,7 @@ void _clInit()
     //insert debug information
     //std::string options= "-cl-nv-verbose"; //Doesn't work on AMD machines
     //options += " -cl-nv-opt-level=3";
-    resultCL = clBuildProgram(oclHandles.program, deviceListSize, oclHandles.devices, NULL, NULL,NULL);
+    resultCL = clBuildProgram(oclHandles.program, 1, &selected_device, NULL, NULL,NULL);
 
     if ((resultCL != CL_SUCCESS) || (oclHandles.program == NULL)) {
         cerr << "InitCL()::Error: In clBuildProgram" << endl;

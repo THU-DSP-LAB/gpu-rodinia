@@ -1,6 +1,6 @@
 #include <cstdlib>
 #include "OpenCL.h"
-#include "timing.h"
+#include "../util/timing.h"
 
 #ifdef TIMING
 	extern struct timeval tv;
