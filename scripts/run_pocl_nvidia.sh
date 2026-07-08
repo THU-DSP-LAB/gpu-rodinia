@@ -368,6 +368,56 @@ compare_pgm_outputs() {
   ' "$file_a" "$file_b"
 }
 
+validate_btree_output() {
+  local file=$1
+
+  awk '
+    BEGIN {
+      split("840187 394382 783099 798440 911647 197551 335222 768229 277774 553970", expect_j, " ")
+      split("477397 628870 364784 513400 952229 916195 635711 717296 141602 606968", expect_k, " ")
+      mode = ""
+      j_seen = 0
+      k_seen = 0
+      j_count = 0
+      k_count = 0
+    }
+    /^[[:space:]]*\*+[[:space:]]*command:[[:space:]]*j[[:space:]]+count=10,[[:space:]]*rSize=10[[:space:]]*$/ {
+      mode = "j"
+      next
+    }
+    /^[[:space:]]*\*+[[:space:]]*command:[[:space:]]*k[[:space:]]+count=10[[:space:]]*$/ {
+      mode = "k"
+      next
+    }
+    mode == "j" && $1 ~ /^[0-9]+$/ {
+      idx = $1 + 1
+      if (idx < 1 || idx > 10 || $2 != expect_j[idx] || $3 != 11)
+        exit 1
+      j_count++
+      if (j_count == 10) {
+        j_seen = 1
+        mode = ""
+      }
+      next
+    }
+    mode == "k" && $1 ~ /^[0-9]+$/ {
+      idx = $1 + 1
+      if (idx < 1 || idx > 10 || $2 != expect_k[idx])
+        exit 1
+      k_count++
+      if (k_count == 10) {
+        k_seen = 1
+        mode = ""
+      }
+      next
+    }
+    END {
+      if (!j_seen || !k_seen || j_count != 10 || k_count != 10)
+        exit 1
+    }
+  ' "$file"
+}
+
 validate_outputs() {
   local benchmark=$1
   local iter=$2
@@ -378,6 +428,15 @@ validate_outputs() {
   local out_file
 
   if [[ -n "$outputs" ]]; then
+    if [[ "$benchmark" == "b+tree" ]]; then
+      local pocl_file="$OUTDIR/$benchmark.pocl.$iter.0.out"
+      if ! validate_btree_output "$pocl_file"; then
+        echo "  validate failed for $benchmark (iter $iter): pocl output does not match expected queries" >&2
+        return 1
+      fi
+      return 0
+    fi
+
     for out_file in ${outputs//|/ }; do
       local native_file="$OUTDIR/$benchmark.native.$iter.$idx.out"
       local pocl_file="$OUTDIR/$benchmark.pocl.$iter.$idx.out"

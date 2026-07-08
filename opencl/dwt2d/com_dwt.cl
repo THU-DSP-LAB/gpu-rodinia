@@ -681,6 +681,7 @@ __kernel void cl_fdwt53Kernel(__global const int * const in,
 	fdwt53.buffer.PADDING = fdwt53.buffer.SHM_BANKS - ((fdwt53.buffer.BUFFER_SIZE + fdwt53.buffer.SHM_BANKS / 2) % fdwt53.buffer.SHM_BANKS) ;
 	fdwt53.buffer.ODD_OFFSET = fdwt53.buffer.BUFFER_SIZE + fdwt53.buffer.PADDING ;
 	fdwt53.STRIDE = fdwt53.buffer.VERTICAL_STRIDE ; 
+	barrier(CLK_LOCAL_MEM_FENCE);
 
 	const int maxX = (get_group_id(0) + 1) * WIN_SIZE_X + 1;
     const int maxY = (get_group_id(1) + 1) * WIN_SIZE_Y * steps + 1;

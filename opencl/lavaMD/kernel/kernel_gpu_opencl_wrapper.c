@@ -431,15 +431,16 @@ kernel_gpu_opencl_wrapper(	par_str par_cpu,
 	//	KERNEL
 	//======================================================================================================================================================150
 
-	// ???
+	int number_boxes = (int)dim_cpu.number_boxes;
+
 	clSetKernelArg(	kernel, 
 					0, 
-					sizeof(par_str), 
-					(void *) &par_cpu);
+					sizeof(fp), 
+					(void *) &par_cpu.alpha);
 	clSetKernelArg(	kernel, 
 					1, 
-					sizeof(dim_str), 
-					(void *) &dim_cpu);
+					sizeof(int), 
+					(void *) &number_boxes);
 	clSetKernelArg(	kernel, 
 					2, 
 					sizeof(cl_mem), 

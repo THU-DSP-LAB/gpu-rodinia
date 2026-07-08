@@ -49,7 +49,7 @@ typedef struct nei_str
 	// neighbor box
 	int x, y, z;
 	int number;
-	long offset;
+	int offset;
 
 } nei_str;
 
@@ -59,7 +59,7 @@ typedef struct box_str
 	// home box
 	int x, y, z;
 	int number;
-	long offset;
+	int offset;
 
 	// neighbor boxes
 	int nn;

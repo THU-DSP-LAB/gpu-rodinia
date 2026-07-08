@@ -243,7 +243,7 @@ kernel_gpu_opencl_wrapper(	int xmax,
 	error = clBuildProgram(	program, 
 							1, 
 							&device, 
-							"-I./../", 
+							"-I./../ -cl-opt-disable", 
 							NULL, 
 							NULL);
 	// Print warnings and errors from compilation

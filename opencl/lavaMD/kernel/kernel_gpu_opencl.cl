@@ -38,7 +38,7 @@ typedef struct nei_str
 	// neighbor box
 	int x, y, z;
 	int number;
-	long offset;
+	int offset;
 
 } nei_str;
 
@@ -48,7 +48,7 @@ typedef struct box_str
 	// home box
 	int x, y, z;
 	int number;
-	long offset;
+	int offset;
 
 	// neighbor boxes
 	int nn;
@@ -85,8 +85,8 @@ typedef struct dim_str
 //	kernel_gpu_opencl KERNEL
 //========================================================================================================================================================================================================200
 
-__kernel void kernel_gpu_opencl(	par_str d_par_gpu,
-					dim_str d_dim_gpu,
+__kernel void kernel_gpu_opencl(	fp alpha,
+					int number_boxes,
 					__global box_str *d_box_gpu,
 					__global FOUR_VECTOR *d_rv_gpu,
 					__global fp *d_qv_gpu,
@@ -114,14 +114,14 @@ __kernel void kernel_gpu_opencl(	par_str d_par_gpu,
 	//	DO FOR THE NUMBER OF BOXES
 	//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------180
 
-	if(bx<d_dim_gpu.number_boxes){
+	if(bx<number_boxes){
 
 		//------------------------------------------------------------------------------------------------------------------------------------------------------160
 		//	Extract input parameters
 		//------------------------------------------------------------------------------------------------------------------------------------------------------160
 
 		// parameters
-		fp a2 = 2*d_par_gpu.alpha*d_par_gpu.alpha;
+		fp a2 = 2*alpha*alpha;
 
 		// home box
 		int first_i;

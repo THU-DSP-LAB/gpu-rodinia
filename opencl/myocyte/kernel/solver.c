@@ -78,7 +78,7 @@
 #define max(x,y) ( (x) < (y) ? (y) : (x) )
 #define min(x,y) ( (x) < (y) ? (x) : (y) )
 
-#define ATTEMPTS 12
+#define ATTEMPTS 64
 #define MIN_SCALE_FACTOR 0.125
 #define MAX_SCALE_FACTOR 4.0
 

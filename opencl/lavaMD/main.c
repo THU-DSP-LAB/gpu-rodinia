@@ -249,8 +249,9 @@ main(	int argc,
 	//	PARAMETERS, DISTANCE, CHARGE AND FORCE
 	//====================================================================================================100
 
-	// random generator seed set to random value - time in this case
-	srand(time(NULL));
+	// Use a fixed seed so native and pocl runs operate on identical inputs.
+	const unsigned int INPUT_SEED = 1U;
+	srand(INPUT_SEED);
 
 	// input (distances)
 	rv_cpu = (FOUR_VECTOR*)malloc(dim_cpu.space_mem);

@@ -142,7 +142,7 @@ kernel_gpu_opencl_wrapper(	record *records,
     }
     printf("Device num: %u\n", devices_size);
     // Get the list of devices (previousely selected for the context)
-    cl_device_id *devices = (cl_device_id *) malloc(devices_size);
+    cl_device_id *devices = (cl_device_id *) malloc(sizeof(cl_device_id) * devices_size);
     error = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, devices_size,
             devices, NULL);
     if (error != CL_SUCCESS) 
