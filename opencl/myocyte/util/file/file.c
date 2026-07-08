@@ -114,7 +114,7 @@ void read_file(	char* filename,
 	if(major==0){																// if matrix is saved row major in memory (C)
 		for(i=0; i<data_rows; i++){
 			for(j=0; j<data_cols; j++){
-				fscanf(fid, "%f", &temp);
+					fscanf(fid, "%lf", &temp);
 				input[i*data_cols+j] = (fp)temp;
 			}
 		}
@@ -122,7 +122,7 @@ void read_file(	char* filename,
 	else{																				// if matrix is saved column major in memory (MATLAB)
 		for(i=0; i<data_rows; i++){
 			for(j=0; j<data_cols; j++){
-				fscanf(fid, "%f", &temp);
+					fscanf(fid, "%lf", &temp);
 				input[j*data_rows+i] = (fp)temp;
 			}
 		}
