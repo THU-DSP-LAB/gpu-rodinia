@@ -8,8 +8,8 @@
 #define WIDTH 16  // shared memory width  
 #define HEIGHT 16 // shared memory height
 
-#define ETA 0.3       //eta value
-#define MOMENTUM 0.3  //momentum value
+#define ETA 0.3f       //eta value
+#define MOMENTUM 0.3f  //momentum value
 #define NUM_THREAD 4  //OpenMP threads
 
 
