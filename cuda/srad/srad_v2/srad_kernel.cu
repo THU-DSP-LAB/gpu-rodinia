@@ -140,13 +140,13 @@ srad_cuda_1(
 
     l = ( n + s + w + e ) / jc;
 
-	num  = (0.5*g2) - ((1.0/16.0)*(l*l)) ;
-	den  = 1 + (.25*l);
+	num  = (0.5f*g2) - ((1.0f/16.0f)*(l*l)) ;
+	den  = 1 + (.25f*l);
 	qsqr = num/(den*den);
 
 	// diffusion coefficent (equ 33)
 	den = (qsqr-q0sqr) / (q0sqr * (1+q0sqr)) ;
-	c = 1.0 / (1.0+den) ;
+	c = 1.0f / (1.0f+den) ;
 
     // saturate diffusion coefficent
 	if (c < 0){temp_result[ty][tx] = 0;}
@@ -256,7 +256,7 @@ srad_cuda_2(
    d_sum = cn * N_C[index] + cs * S_C[index] + cw * W_C[index] + ce * E_C[index];
 
    // image update (equ 61)
-   c_cuda_result[ty][tx] = temp[ty][tx] + 0.25 * lambda * d_sum;
+   c_cuda_result[ty][tx] = temp[ty][tx] + 0.25f * lambda * d_sum;
 
    __syncthreads();
               

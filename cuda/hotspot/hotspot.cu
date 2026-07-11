@@ -126,7 +126,7 @@ __global__ void calculate_temp(int iteration,  //number of iteration
         __shared__ float power_on_cuda[BLOCK_SIZE][BLOCK_SIZE];
         __shared__ float temp_t[BLOCK_SIZE][BLOCK_SIZE]; // saving temparary temperature result
 
-	float amb_temp = 80.0;
+	float amb_temp = 80.0f;
         float step_div_Cap;
         float Rx_1,Ry_1,Rz_1;
         
@@ -199,8 +199,8 @@ __global__ void calculate_temp(int iteration,  //number of iteration
                   IN_RANGE(ty, validYmin, validYmax) ) {
                   computed = true;
                   temp_t[ty][tx] =   temp_on_cuda[ty][tx] + step_div_Cap * (power_on_cuda[ty][tx] + 
-	       	         (temp_on_cuda[S][tx] + temp_on_cuda[N][tx] - 2.0*temp_on_cuda[ty][tx]) * Ry_1 + 
-		             (temp_on_cuda[ty][E] + temp_on_cuda[ty][W] - 2.0*temp_on_cuda[ty][tx]) * Rx_1 + 
+		             (temp_on_cuda[S][tx] + temp_on_cuda[N][tx] - 2.0f*temp_on_cuda[ty][tx]) * Ry_1 +
+		             (temp_on_cuda[ty][E] + temp_on_cuda[ty][W] - 2.0f*temp_on_cuda[ty][tx]) * Rx_1 +
 		             (amb_temp - temp_on_cuda[ty][tx]) * Rz_1);
 	
             }

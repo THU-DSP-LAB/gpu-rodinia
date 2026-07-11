@@ -1321,7 +1321,7 @@ __global__ void kernel(){
 			ori_pointer = ori_col*d_common.frame_rows+ori_row;
 
 			// update template
-			d_in[ei_new] = d_common.alpha*d_in[ei_new] + (1.00-d_common.alpha)*d_common_change.d_frame[ori_pointer];
+			d_in[ei_new] = d_common.alpha*d_in[ei_new] + (1.00f-d_common.alpha)*d_common_change.d_frame[ori_pointer];
 
 			// go for second round
 			ei_new = ei_new + NUMBER_THREADS;
