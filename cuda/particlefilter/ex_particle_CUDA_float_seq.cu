@@ -463,36 +463,27 @@ __global__ void find_index_kernel(double * arrayX, double * arrayY, double * CDF
     __syncthreads();
 }
 
-__global__ void normalize_weights_kernel(double * weights, int Nparticles, double* partial_sums, double * CDF, double * u, int * seed) {
+__global__ void normalize_weights_kernel(double * weights, int Nparticles, double* partial_sums) {
     int block_id = blockIdx.x;
     int i = blockDim.x * block_id + threadIdx.x;
-    __shared__ double u1, sumWeights;
-    
-    if(0 == threadIdx.x)
-        sumWeights = partial_sums[0];
-    
-    __syncthreads();
-    
+
     if (i < Nparticles) {
-        weights[i] = weights[i] / sumWeights;
+        weights[i] = weights[i] / partial_sums[0];
     }
-    
-    __syncthreads(); 
-    
-    if (i == 0) {
+}
+
+__global__ void prepare_resampling_kernel(double * weights, int Nparticles, double * CDF, double * u, int * seed) {
+    if (blockIdx.x == 0 && threadIdx.x == 0) {
         cdfCalc(CDF, weights, Nparticles);
-        u[0] = (1 / ((double) (Nparticles))) * d_randu(seed, i); // do this to allow all threads in all blocks to use the same u1
+        u[0] = (1 / ((double) (Nparticles))) * d_randu(seed, 0);
     }
-    
-    __syncthreads();
-    
-    if(0 == threadIdx.x) 
-        u1 = u[0];
-    
-    __syncthreads();
-        
+}
+
+__global__ void initialize_resampling_offsets_kernel(double * u, int Nparticles) {
+    int i = blockDim.x * blockIdx.x + threadIdx.x;
+
     if (i < Nparticles) {
-        u[i] = u1 + i / ((double) (Nparticles));
+        u[i] = u[0] + i / ((double) (Nparticles));
     }
 }
 
@@ -941,7 +932,11 @@ void particleFilter(
 
         sum_kernel << < num_blocks, threads_per_block >> > (partial_sums, Nparticles);
 
-        normalize_weights_kernel << < num_blocks, threads_per_block >> > (weights_GPU, Nparticles, partial_sums, CDF_GPU, u_GPU, seed_GPU);
+        normalize_weights_kernel << < num_blocks, threads_per_block >> > (weights_GPU, Nparticles, partial_sums);
+
+        prepare_resampling_kernel << < 1, 1 >> > (weights_GPU, Nparticles, CDF_GPU, u_GPU, seed_GPU);
+
+        initialize_resampling_offsets_kernel << < num_blocks, threads_per_block >> > (u_GPU, Nparticles);
         
         find_index_kernel << < num_blocks, threads_per_block >> > (arrayX_GPU, arrayY_GPU, CDF_GPU, u_GPU, xj_GPU, yj_GPU, weights_GPU, Nparticles);
 
