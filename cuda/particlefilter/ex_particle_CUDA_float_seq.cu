@@ -11,14 +11,14 @@
 #include "../../common/rodinia_verify.h"
 #define BLOCK_X 16
 #define BLOCK_Y 16
-#define PI 3.1415926535897932
-
-const int threads_per_block = 512;
+constexpr int threads_per_block = 512;
+constexpr int normal_uniform_samples = 12;
+constexpr float normal_uniform_mean = 6.0F;
 
 #define PARTICLEFILTER_FLOAT_REFERENCE_MAGIC "GPIDL_RODINIA_PARTICLEFILTER_FLOAT_REFERENCE"
-#define PARTICLEFILTER_FLOAT_REFERENCE_VERSION 1
-#define PARTICLEFILTER_FLOAT_ABS_TOLERANCE 1.0e-6
-#define PARTICLEFILTER_FLOAT_REL_TOLERANCE 1.0e-6
+#define PARTICLEFILTER_FLOAT_REFERENCE_VERSION 2
+#define PARTICLEFILTER_FLOAT_ABS_TOLERANCE 1.0e-6F
+#define PARTICLEFILTER_FLOAT_REL_TOLERANCE 1.0e-6F
 
 typedef struct {
     int seed_base;
@@ -33,9 +33,9 @@ typedef struct {
     int frames;
     int particles;
     int seed_base;
-    double xe;
-    double ye;
-    double distance;
+    float xe;
+    float ye;
+    float distance;
 } ParticlefilterFloatReference;
 
 static int parse_int_argument(const char *text, const char *name, int *value) {
@@ -111,9 +111,9 @@ static int save_reference(const char *path, const ParticlefilterFloatReference *
     fprintf(file, "frames %d\n", reference->frames);
     fprintf(file, "particles %d\n", reference->particles);
     fprintf(file, "seed_base %d\n", reference->seed_base);
-    fprintf(file, "xe %.17g\n", reference->xe);
-    fprintf(file, "ye %.17g\n", reference->ye);
-    fprintf(file, "distance %.17g\n", reference->distance);
+    fprintf(file, "xe %.9g\n", reference->xe);
+    fprintf(file, "ye %.9g\n", reference->ye);
+    fprintf(file, "distance %.9g\n", reference->distance);
     if (fclose(file) != 0) {
         fprintf(stderr, "Failed closing particlefilter_float reference: %s\n", path);
         return -1;
@@ -153,22 +153,22 @@ static int read_reference(const char *path, ParticlefilterFloatReference *refere
     failed |= scan_reference(file, "frames", "%d", &reference->frames);
     failed |= scan_reference(file, "particles", "%d", &reference->particles);
     failed |= scan_reference(file, "seed_base", "%d", &reference->seed_base);
-    failed |= scan_reference(file, "xe", "%lf", &reference->xe);
-    failed |= scan_reference(file, "ye", "%lf", &reference->ye);
-    failed |= scan_reference(file, "distance", "%lf", &reference->distance);
+    failed |= scan_reference(file, "xe", "%f", &reference->xe);
+    failed |= scan_reference(file, "ye", "%f", &reference->ye);
+    failed |= scan_reference(file, "distance", "%f", &reference->distance);
     fclose(file);
     return failed == 0 ? 0 : -1;
 }
 
-static int compare_double_field(const char *field, double actual, double expected) {
-    double diff = fabs(actual - expected);
-    double tolerance = PARTICLEFILTER_FLOAT_ABS_TOLERANCE +
-        PARTICLEFILTER_FLOAT_REL_TOLERANCE * fabs(expected);
+static int compare_float_field(const char *field, float actual, float expected) {
+    float diff = fabsf(actual - expected);
+    float tolerance = PARTICLEFILTER_FLOAT_ABS_TOLERANCE +
+        PARTICLEFILTER_FLOAT_REL_TOLERANCE * fabsf(expected);
     if (isfinite(actual) && isfinite(expected) && diff <= tolerance) {
         return 0;
     }
     fprintf(stderr,
-            "particlefilter_float reference mismatch for %s: actual=%.17g expected=%.17g diff=%.17g tolerance=%.17g\n",
+            "particlefilter_float reference mismatch for %s: actual=%.9g expected=%.9g diff=%.9g tolerance=%.9g\n",
             field,
             actual,
             expected,
@@ -201,9 +201,9 @@ static int verify_reference(const char *path, const ParticlefilterFloatReference
                 expected.seed_base);
         failed = -1;
     }
-    failed |= compare_double_field("xe", actual->xe, expected.xe);
-    failed |= compare_double_field("ye", actual->ye, expected.ye);
-    failed |= compare_double_field("distance", actual->distance, expected.distance);
+    failed |= compare_float_field("xe", actual->xe, expected.xe);
+    failed |= compare_float_field("ye", actual->ye, expected.ye);
+    failed |= compare_float_field("distance", actual->distance, expected.distance);
     if (failed != 0) {
         rodinia_print_fail("Particlefilter float reference verification");
         return -1;
@@ -236,8 +236,8 @@ long long get_time() {
 }
 // Returns the number of seconds elapsed between the two specified times
 
-double elapsed_time(long long start_time, long long end_time) {
-    return (double) (end_time - start_time) / (1000 * 1000);
+float elapsed_time(long long start_time, long long end_time) {
+    return (float) (end_time - start_time) / 1000000.0F;
 }
 
 /*****************************
@@ -252,18 +252,18 @@ void check_error(cudaError e) {
     }
 }
 
-void cuda_print_double_array(double *array_GPU, size_t size) {
+void cuda_print_float_array(float *array_GPU, size_t size) {
     //allocate temporary array for printing
-    double* mem = (double*) malloc(sizeof (double) *size);
+    float* mem = (float*) malloc(sizeof (float) *size);
 
     //transfer data from device
-    cudaMemcpy(mem, array_GPU, sizeof (double) *size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(mem, array_GPU, sizeof (float) *size, cudaMemcpyDeviceToHost);
 
 
     printf("PRINTING ARRAY VALUES\n");
     //print values in memory
     for (size_t i = 0; i < size; ++i) {
-        printf("[%d]:%0.6f\n", i, mem[i]);
+        printf("[%zu]:%0.6f\n", i, mem[i]);
     }
     printf("FINISHED PRINTING ARRAY VALUES\n");
 
@@ -278,13 +278,17 @@ void cuda_print_double_array(double *array_GPU, size_t size) {
  * param 1 I 3D matrix
  * param 2 current ind array
  * param 3 length of ind array
- * returns a double representing the sum
+ * returns a float representing the sum
  ********************************/
-__device__ double calcLikelihoodSum(unsigned char * I, int * ind, int numOnes, int index) {
-    double likelihoodSum = 0.0;
+__device__ float calcLikelihoodSum(unsigned char * I, int * ind, int numOnes, int index) {
+    float likelihoodSum = 0.0F;
     int x;
-    for (x = 0; x < numOnes; x++)
-        likelihoodSum += (pow((double) (I[ind[index * numOnes + x]] - 100), 2) - pow((double) (I[ind[index * numOnes + x]] - 228), 2)) / 50.0;
+    for (x = 0; x < numOnes; x++) {
+        const float foreground_delta = (float) (I[ind[index * numOnes + x]] - 100);
+        const float background_delta = (float) (I[ind[index * numOnes + x]] - 228);
+        likelihoodSum +=
+            (foreground_delta * foreground_delta - background_delta * background_delta) / 50.0F;
+    }
     return likelihoodSum;
 }
 
@@ -295,7 +299,7 @@ param1 CDF
 param2 weights
 param3 Nparticles
  *****************************/
-__device__ void cdfCalc(double * CDF, double * weights, int Nparticles) {
+__device__ void cdfCalc(float * CDF, float * weights, int Nparticles) {
     int x;
     CDF[0] = weights[0];
     for (x = 1; x < Nparticles; x++) {
@@ -306,9 +310,9 @@ __device__ void cdfCalc(double * CDF, double * weights, int Nparticles) {
 /*****************************
  * RANDU
  * GENERATES A UNIFORM DISTRIBUTION
- * returns a double representing a randomily generated number from a uniform distribution with range [0, 1)
+ * returns a float representing a randomily generated number from a uniform distribution with range [0, 1)
  ******************************/
-__device__ double d_randu(int * seed, int index) {
+__device__ float d_randu(int * seed, int index) {
 
     int M = INT_MAX;
     int A = 1103515245;
@@ -316,7 +320,7 @@ __device__ double d_randu(int * seed, int index) {
     int num = A * seed[index] + C;
     seed[index] = num % M;
 
-    return fabs(seed[index] / ((double) M));
+    return fabsf(seed[index] / ((float) M));
 }/**
 * Generates a uniformly distributed random number using the provided seed and GCC's settings for the Linear Congruential Generator (LCG)
 * @see http://en.wikipedia.org/wiki/Linear_congruential_generator
@@ -326,47 +330,39 @@ __device__ double d_randu(int * seed, int index) {
 * @return a uniformly distributed number [0, 1)
 */
 
-double randu(int * seed, int index) {
+float randu(int * seed, int index) {
     int num = A * seed[index] + C;
     seed[index] = num % M;
-    return fabs(seed[index] / ((double) M));
+    return fabsf(seed[index] / ((float) M));
 }
 
 /**
- * Generates a normally distributed random number using the Box-Muller transformation
+ * Approximates a standard normal variate with the centered sum of 12 uniform variates.
+ * The fixed FP32 addition path is reproducible across CUDA and functional-simulator backends.
  * @note This function is thread-safe
  * @param seed The seed array
  * @param index The specific index of the seed to be advanced
- * @return a double representing random number generated using the Box-Muller algorithm
- * @see http://en.wikipedia.org/wiki/Normal_distribution, section computing value for normal random distribution
+ * @return a float representing random number generated using the Box-Muller algorithm
+ * @see https://en.wikipedia.org/wiki/Irwin%E2%80%93Hall_distribution
  */
-double randn(int * seed, int index) {
-    /*Box-Muller algorithm*/
-    double u = randu(seed, index);
-    double v = randu(seed, index);
-    double cosine = cos(2 * PI * v);
-    double rt = -2 * log(u);
-    return sqrt(rt) * cosine;
+float randn(int * seed, int index) {
+    float sample = 0.0F;
+    for (int i = 0; i < normal_uniform_samples; ++i) {
+        sample += randu(seed, index);
+    }
+    return sample - normal_uniform_mean;
 }
 
-double test_randn(int * seed, int index) {
-    //Box-Muller algortihm
-    double pi = 3.14159265358979323846;
-    double u = randu(seed, index);
-    double v = randu(seed, index);
-    double cosine = cos(2 * pi * v);
-    double rt = -2 * log(u);
-    return sqrt(rt) * cosine;
+float test_randn(int * seed, int index) {
+    return randn(seed, index);
 }
 
-__device__ double d_randn(int * seed, int index) {
-    //Box-Muller algortihm
-    double pi = 3.14159265358979323846;
-    double u = d_randu(seed, index);
-    double v = d_randu(seed, index);
-    double cosine = cos(2 * pi * v);
-    double rt = -2 * log(u);
-    return sqrt(rt) * cosine;
+__device__ float d_randn(int * seed, int index) {
+    float sample = 0.0F;
+    for (int i = 0; i < normal_uniform_samples; ++i) {
+        sample += d_randu(seed, index);
+    }
+    return sample - normal_uniform_mean;
 }
 
 /****************************
@@ -376,17 +372,17 @@ param1 weights
 param2 likelihood
 param3 Nparcitles
  ****************************/
-__device__ double updateWeights(double * weights, double * likelihood, int Nparticles) {
+__device__ float updateWeights(float * weights, float * likelihood, int Nparticles) {
     int x;
-    double sum = 0;
+    float sum = 0;
     for (x = 0; x < Nparticles; x++) {
-        weights[x] = weights[x] * exp(likelihood[x]);
+        weights[x] = weights[x] * expf(likelihood[x]);
         sum += weights[x];
     }
     return sum;
 }
 
-__device__ int findIndexBin(double * CDF, int beginIndex, int endIndex, double value) {
+__device__ int findIndexBin(float * CDF, int beginIndex, int endIndex, float value) {
     if (endIndex < beginIndex)
         return -1;
     int middleIndex;
@@ -412,11 +408,11 @@ __device__ int findIndexBin(double * CDF, int beginIndex, int endIndex, double v
     return -1;
 }
 
-/** added this function. was missing in original double version.
- * Takes in a double and returns an integer that approximates to that double
+/** added this function. was missing in original float version.
+ * Takes in a float and returns an integer that approximates to that float
  * @return if the mantissa < .5 => return value < input value; else return value > input value
  */
-__device__ double dev_round_double(double value) {
+__device__ float dev_round_float(float value) {
     int newValue = (int) (value);
     if (value - newValue < .5f)
         return newValue;
@@ -435,7 +431,7 @@ __device__ double dev_round_double(double value) {
  * param7: weights
  * param8: Nparticles
  *****************************/
-__global__ void find_index_kernel(double * arrayX, double * arrayY, double * CDF, double * u, double * xj, double * yj, double * weights, int Nparticles) {
+__global__ void find_index_kernel(float * arrayX, float * arrayY, float * CDF, float * u, float * xj, float * yj, float * weights, int Nparticles) {
     int block_id = blockIdx.x;
     int i = blockDim.x * block_id + threadIdx.x;
 
@@ -457,48 +453,68 @@ __global__ void find_index_kernel(double * arrayX, double * arrayY, double * CDF
         xj[i] = arrayX[index];
         yj[i] = arrayY[index];
 
-        //weights[i] = 1 / ((double) (Nparticles)); //moved this code to the beginning of likelihood kernel
+        //weights[i] = 1 / ((float) (Nparticles)); //moved this code to the beginning of likelihood kernel
 
     }
     __syncthreads();
 }
 
-__global__ void normalize_weights_kernel(double * weights, int Nparticles, double* partial_sums) {
-    int block_id = blockIdx.x;
-    int i = blockDim.x * block_id + threadIdx.x;
+__global__ void normalize_weights_kernel(
+        float * weights,
+        const float * likelihood,
+        int Nparticles) {
+    __shared__ float reduction[threads_per_block];
+    const int tid = threadIdx.x;
 
-    if (i < Nparticles) {
-        weights[i] = weights[i] / partial_sums[0];
+    float max_likelihood = -FLT_MAX;
+    for (int i = tid; i < Nparticles; i += blockDim.x) {
+        max_likelihood = fmaxf(max_likelihood, likelihood[i]);
     }
+    reduction[tid] = max_likelihood;
+    __syncthreads();
+
+    for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
+        if (tid < stride) {
+            reduction[tid] = fmaxf(reduction[tid], reduction[tid + stride]);
+        }
+        __syncthreads();
+    }
+    max_likelihood = reduction[0];
+
+    float sum = 0.0F;
+    for (int i = tid; i < Nparticles; i += blockDim.x) {
+        weights[i] = expf(likelihood[i] - max_likelihood);
+        sum += weights[i];
+    }
+    reduction[tid] = sum;
+    __syncthreads();
+
+    for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
+        if (tid < stride) {
+            reduction[tid] += reduction[tid + stride];
+        }
+        __syncthreads();
+    }
+
+    const float weight_sum = reduction[0];
+    for (int i = tid; i < Nparticles; i += blockDim.x) {
+        weights[i] /= weight_sum;
+    }
+    __syncthreads();
 }
 
-__global__ void prepare_resampling_kernel(double * weights, int Nparticles, double * CDF, double * u, int * seed) {
+__global__ void prepare_resampling_kernel(float * weights, int Nparticles, float * CDF, float * u, int * seed) {
     if (blockIdx.x == 0 && threadIdx.x == 0) {
         cdfCalc(CDF, weights, Nparticles);
-        u[0] = (1 / ((double) (Nparticles))) * d_randu(seed, 0);
+        u[0] = (1 / ((float) (Nparticles))) * d_randu(seed, 0);
     }
 }
 
-__global__ void initialize_resampling_offsets_kernel(double * u, int Nparticles) {
+__global__ void initialize_resampling_offsets_kernel(float * u, int Nparticles) {
     int i = blockDim.x * blockIdx.x + threadIdx.x;
 
     if (i < Nparticles) {
-        u[i] = u[0] + i / ((double) (Nparticles));
-    }
-}
-
-__global__ void sum_kernel(double* partial_sums, int Nparticles) {
-    int block_id = blockIdx.x;
-    int i = blockDim.x * block_id + threadIdx.x;
-
-    if (i == 0) {
-        int x;
-        double sum = 0.0;
-        int num_blocks = ceil((double) Nparticles / (double) threads_per_block);
-        for (x = 0; x < num_blocks; x++) {
-            sum += partial_sums[x];
-        }
-        partial_sums[0] = sum;
+        u[i] = u[0] + i / ((float) (Nparticles));
     }
 }
 
@@ -506,13 +522,10 @@ __global__ void sum_kernel(double* partial_sums, int Nparticles) {
  * CUDA Likelihood Kernel Function to replace FindIndex
  * param1: arrayX
  * param2: arrayY
- * param2.5: CDF
  * param3: ind
  * param4: objxy
  * param5: likelihood
  * param6: I
- * param6.5: u
- * param6.75: weights
  * param7: Nparticles
  * param8: countOnes
  * param9: max_size
@@ -520,80 +533,54 @@ __global__ void sum_kernel(double* partial_sums, int Nparticles) {
  * param11: IszY
  * param12: Nfr
  *****************************/
-__global__ void likelihood_kernel(double * arrayX, double * arrayY, double * xj, double * yj, double * CDF, int * ind, int * objxy, double * likelihood, unsigned char * I, double * u, double * weights, int Nparticles, int countOnes, int max_size, int k, int IszY, int Nfr, int *seed, double* partial_sums) {
+__global__ void likelihood_kernel(
+        float * arrayX,
+        float * arrayY,
+        float * xj,
+        float * yj,
+        int * ind,
+        int * objxy,
+        float * likelihood,
+        unsigned char * I,
+        int Nparticles,
+        int countOnes,
+        int max_size,
+        int k,
+        int IszY,
+        int Nfr,
+        int * seed) {
     int block_id = blockIdx.x;
     int i = blockDim.x * block_id + threadIdx.x;
     int y;
-    
-    int indX, indY; 
-    __shared__ double buffer[512];
+
+    int indX, indY;
     if (i < Nparticles) {
-        arrayX[i] = xj[i]; 
-        arrayY[i] = yj[i]; 
-
-        weights[i] = 1 / ((double) (Nparticles)); //Donnie - moved this line from end of find_index_kernel to prevent all weights from being reset before calculating position on final iteration.
-
-        arrayX[i] = arrayX[i] + 1.0 + 5.0 * d_randn(seed, i);
-        arrayY[i] = arrayY[i] - 2.0 + 2.0 * d_randn(seed, i);
-        
-    }
-
-    __syncthreads();
-
-    if (i < Nparticles) {
+        arrayX[i] = xj[i];
+        arrayY[i] = yj[i];
+        arrayX[i] = arrayX[i] + 1.0F + 5.0F * d_randn(seed, i);
+        arrayY[i] = arrayY[i] - 2.0F + 2.0F * d_randn(seed, i);
         for (y = 0; y < countOnes; y++) {
-            //added dev_round_double() to be consistent with roundDouble
-            indX = dev_round_double(arrayX[i]) + objxy[y * 2 + 1];
-            indY = dev_round_double(arrayY[i]) + objxy[y * 2];
-            
+            //added dev_round_float() to be consistent with roundFloat
+            indX = dev_round_float(arrayX[i]) + objxy[y * 2 + 1];
+            indY = dev_round_float(arrayY[i]) + objxy[y * 2];
+
             ind[i * countOnes + y] = abs(indX * IszY * Nfr + indY * Nfr + k);
             if (ind[i * countOnes + y] >= max_size)
                 ind[i * countOnes + y] = 0;
         }
         likelihood[i] = calcLikelihoodSum(I, ind, countOnes, i);
-        
+
         likelihood[i] = likelihood[i] / countOnes;
-        
-        weights[i] = weights[i] * exp(likelihood[i]); //Donnie Newell - added the missing exponential function call
-        
     }
-
-    buffer[threadIdx.x] = 0.0;
-
-    __syncthreads();
-
-    if (i < Nparticles) {
-
-        buffer[threadIdx.x] = weights[i];
-    }
-
-    __syncthreads();
-
-    //this doesn't account for the last block that isn't full
-    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (threadIdx.x < s) {
-            buffer[threadIdx.x] += buffer[threadIdx.x + s];
-        }
-        
-        __syncthreads();
-            
-    }
-    if (threadIdx.x == 0) {
-        partial_sums[blockIdx.x] = buffer[0];
-    }
-    
-    __syncthreads();
-
-    
 }
 
-/** 
- * Takes in a double and returns an integer that approximates to that double
+/**
+ * Takes in a float and returns an integer that approximates to that float
  * @return if the mantissa < .5 => return value < input value; else return value > input value
  */
-double roundDouble(double value) {
+float roundFloat(float value) {
     int newValue = (int) (value);
-    if (value - newValue < .5)
+    if (value - newValue < .5F)
         return newValue;
     else
         return newValue++;
@@ -649,7 +636,7 @@ void strelDisk(int * disk, int radius) {
     int x, y;
     for (x = 0; x < diameter; x++) {
         for (y = 0; y < diameter; y++) {
-            double distance = sqrt(pow((double) (x - radius + 1), 2) + pow((double) (y - radius + 1), 2));
+            float distance = sqrtf(powf((float) (x - radius + 1), 2) + powf((float) (y - radius + 1), 2));
             if (distance < radius)
                 disk[x * diameter + y] = 1;
             else
@@ -685,7 +672,7 @@ void dilate_matrix(unsigned char * matrix, int posX, int posY, int posZ, int dim
     int x, y;
     for (x = startX; x < endX; x++) {
         for (y = startY; y < endY; y++) {
-            double distance = sqrt(pow((double) (x - posX), 2) + pow((double) (y - posY), 2));
+            float distance = sqrtf(powf((float) (x - posX), 2) + powf((float) (y - posY), 2));
             if (distance < error)
                 matrix[x * dimY * dimZ + y * dimZ + posZ] = 1;
         }
@@ -753,8 +740,8 @@ void videoSequence(unsigned char * I, int IszX, int IszY, int Nfr, int * seed) {
     int k;
     int max_size = IszX * IszY * Nfr;
     /*get object centers*/
-    int x0 = (int) roundDouble(IszY / 2.0);
-    int y0 = (int) roundDouble(IszX / 2.0);
+    int x0 = (int) roundFloat(IszY / 2.0F);
+    int y0 = (int) roundFloat(IszX / 2.0F);
     I[x0 * IszY * Nfr + y0 * Nfr + 0] = 1;
 
     /*move point*/
@@ -797,7 +784,7 @@ void videoSequence(unsigned char * I, int IszX, int IszY, int Nfr, int * seed) {
  * @param value The value to be found
  * @return The index of value in the CDF; if value is never found, returns the last index
  */
-int findIndex(double * CDF, int lengthCDF, double value) {
+int findIndex(float * CDF, int lengthCDF, float value) {
     int index = -1;
     int x;
     for (x = 0; x < lengthCDF; x++) {
@@ -833,8 +820,8 @@ void particleFilter(
         ParticlefilterFloatReference *reference) {
     int max_size = IszX * IszY*Nfr;
     //original particle centroid
-    double xe = roundDouble(IszY / 2.0);
-    double ye = roundDouble(IszX / 2.0);
+    float xe = roundFloat(IszY / 2.0F);
+    float ye = roundFloat(IszX / 2.0F);
 
     //expected object locations, compared to center
     int radius = 5;
@@ -852,57 +839,55 @@ void particleFilter(
     int * objxy = (int *) malloc(countOnes * 2 * sizeof (int));
     getneighbors(disk, countOnes, objxy, radius);
     //initial weights are all equal (1/Nparticles)
-    double * weights = (double *) malloc(sizeof (double) *Nparticles);
+    float * weights = (float *) malloc(sizeof (float) *Nparticles);
     for (x = 0; x < Nparticles; x++) {
-        weights[x] = 1 / ((double) (Nparticles));
+        weights[x] = 1 / ((float) (Nparticles));
     }
 
     //initial likelihood to 0.0
-    double * likelihood = (double *) malloc(sizeof (double) *Nparticles);
-    double * arrayX = (double *) malloc(sizeof (double) *Nparticles);
-    double * arrayY = (double *) malloc(sizeof (double) *Nparticles);
-    double * xj = (double *) malloc(sizeof (double) *Nparticles);
-    double * yj = (double *) malloc(sizeof (double) *Nparticles);
-    double * CDF = (double *) malloc(sizeof (double) *Nparticles);
+    float * likelihood = (float *) malloc(sizeof (float) *Nparticles);
+    float * arrayX = (float *) malloc(sizeof (float) *Nparticles);
+    float * arrayY = (float *) malloc(sizeof (float) *Nparticles);
+    float * xj = (float *) malloc(sizeof (float) *Nparticles);
+    float * yj = (float *) malloc(sizeof (float) *Nparticles);
+    float * CDF = (float *) malloc(sizeof (float) *Nparticles);
 
     //GPU copies of arrays
-    double * arrayX_GPU;
-    double * arrayY_GPU;
-    double * xj_GPU;
-    double * yj_GPU;
-    double * CDF_GPU;
-    double * likelihood_GPU;
+    float * arrayX_GPU;
+    float * arrayY_GPU;
+    float * xj_GPU;
+    float * yj_GPU;
+    float * CDF_GPU;
+    float * likelihood_GPU;
     unsigned char * I_GPU;
-    double * weights_GPU;
+    float * weights_GPU;
     int * objxy_GPU;
 
     int * ind = (int*) malloc(sizeof (int) *countOnes * Nparticles);
     int * ind_GPU;
-    double * u = (double *) malloc(sizeof (double) *Nparticles);
-    double * u_GPU;
+    float * u = (float *) malloc(sizeof (float) *Nparticles);
+    float * u_GPU;
     int * seed_GPU;
-    double* partial_sums;
 
     //CUDA memory allocation
-    check_error(cudaMalloc((void **) &arrayX_GPU, sizeof (double) *Nparticles));
-    check_error(cudaMalloc((void **) &arrayY_GPU, sizeof (double) *Nparticles));
-    check_error(cudaMalloc((void **) &xj_GPU, sizeof (double) *Nparticles));
-    check_error(cudaMalloc((void **) &yj_GPU, sizeof (double) *Nparticles));
-    check_error(cudaMalloc((void **) &CDF_GPU, sizeof (double) *Nparticles));
-    check_error(cudaMalloc((void **) &u_GPU, sizeof (double) *Nparticles));
-    check_error(cudaMalloc((void **) &likelihood_GPU, sizeof (double) *Nparticles));
+    check_error(cudaMalloc((void **) &arrayX_GPU, sizeof (float) *Nparticles));
+    check_error(cudaMalloc((void **) &arrayY_GPU, sizeof (float) *Nparticles));
+    check_error(cudaMalloc((void **) &xj_GPU, sizeof (float) *Nparticles));
+    check_error(cudaMalloc((void **) &yj_GPU, sizeof (float) *Nparticles));
+    check_error(cudaMalloc((void **) &CDF_GPU, sizeof (float) *Nparticles));
+    check_error(cudaMalloc((void **) &u_GPU, sizeof (float) *Nparticles));
+    check_error(cudaMalloc((void **) &likelihood_GPU, sizeof (float) *Nparticles));
     //set likelihood to zero
-    check_error(cudaMemset((void *) likelihood_GPU, 0, sizeof (double) *Nparticles));
-    check_error(cudaMalloc((void **) &weights_GPU, sizeof (double) *Nparticles));
+    check_error(cudaMemset((void *) likelihood_GPU, 0, sizeof (float) *Nparticles));
+    check_error(cudaMalloc((void **) &weights_GPU, sizeof (float) *Nparticles));
     check_error(cudaMalloc((void **) &I_GPU, sizeof (unsigned char) *IszX * IszY * Nfr));
     check_error(cudaMalloc((void **) &objxy_GPU, sizeof (int) *2 * countOnes));
     check_error(cudaMalloc((void **) &ind_GPU, sizeof (int) *countOnes * Nparticles));
     check_error(cudaMalloc((void **) &seed_GPU, sizeof (int) *Nparticles));
-    check_error(cudaMalloc((void **) &partial_sums, sizeof (double) *Nparticles));
 
 
     //Donnie - this loop is different because in this kernel, arrayX and arrayY
-    //  are set equal to xj before every iteration, so effectively, arrayX and 
+    //  are set equal to xj before every iteration, so effectively, arrayX and
     //  arrayY will be set to xe and ye before the first iteration.
     for (x = 0; x < Nparticles; x++) {
 
@@ -912,32 +897,44 @@ void particleFilter(
     }
 
     int k;
-    int indX, indY;
     //start send
     long long send_start = get_time();
     check_error(cudaMemcpy(I_GPU, I, sizeof (unsigned char) *IszX * IszY*Nfr, cudaMemcpyHostToDevice));
     check_error(cudaMemcpy(objxy_GPU, objxy, sizeof (int) *2 * countOnes, cudaMemcpyHostToDevice));
-    check_error(cudaMemcpy(weights_GPU, weights, sizeof (double) *Nparticles, cudaMemcpyHostToDevice));
-    check_error(cudaMemcpy(xj_GPU, xj, sizeof (double) *Nparticles, cudaMemcpyHostToDevice));
-    check_error(cudaMemcpy(yj_GPU, yj, sizeof (double) *Nparticles, cudaMemcpyHostToDevice));
+    check_error(cudaMemcpy(weights_GPU, weights, sizeof (float) *Nparticles, cudaMemcpyHostToDevice));
+    check_error(cudaMemcpy(xj_GPU, xj, sizeof (float) *Nparticles, cudaMemcpyHostToDevice));
+    check_error(cudaMemcpy(yj_GPU, yj, sizeof (float) *Nparticles, cudaMemcpyHostToDevice));
     check_error(cudaMemcpy(seed_GPU, seed, sizeof (int) *Nparticles, cudaMemcpyHostToDevice));
     long long send_end = get_time();
     printf("TIME TO SEND TO GPU: %f\n", elapsed_time(send_start, send_end));
-    int num_blocks = ceil((double) Nparticles / (double) threads_per_block);
+    int num_blocks = (Nparticles + threads_per_block - 1) / threads_per_block;
 
 
     for (k = 1; k < Nfr; k++) {
-        
-        likelihood_kernel << < num_blocks, threads_per_block >> > (arrayX_GPU, arrayY_GPU, xj_GPU, yj_GPU, CDF_GPU, ind_GPU, objxy_GPU, likelihood_GPU, I_GPU, u_GPU, weights_GPU, Nparticles, countOnes, max_size, k, IszY, Nfr, seed_GPU, partial_sums);
 
-        sum_kernel << < num_blocks, threads_per_block >> > (partial_sums, Nparticles);
+        likelihood_kernel << < num_blocks, threads_per_block >> > (
+            arrayX_GPU,
+            arrayY_GPU,
+            xj_GPU,
+            yj_GPU,
+            ind_GPU,
+            objxy_GPU,
+            likelihood_GPU,
+            I_GPU,
+            Nparticles,
+            countOnes,
+            max_size,
+            k,
+            IszY,
+            Nfr,
+            seed_GPU);
 
-        normalize_weights_kernel << < num_blocks, threads_per_block >> > (weights_GPU, Nparticles, partial_sums);
+        normalize_weights_kernel << < 1, threads_per_block >> > (weights_GPU, likelihood_GPU, Nparticles);
 
         prepare_resampling_kernel << < 1, 1 >> > (weights_GPU, Nparticles, CDF_GPU, u_GPU, seed_GPU);
 
         initialize_resampling_offsets_kernel << < num_blocks, threads_per_block >> > (u_GPU, Nparticles);
-        
+
         find_index_kernel << < num_blocks, threads_per_block >> > (arrayX_GPU, arrayY_GPU, CDF_GPU, u_GPU, xj_GPU, yj_GPU, weights_GPU, Nparticles);
 
     }//end loop
@@ -955,21 +952,20 @@ void particleFilter(
     cudaFree(objxy_GPU);
     cudaFree(ind_GPU);
     cudaFree(seed_GPU);
-    cudaFree(partial_sums);
 
     long long free_time = get_time();
-    check_error(cudaMemcpy(arrayX, arrayX_GPU, sizeof (double) *Nparticles, cudaMemcpyDeviceToHost));
+    check_error(cudaMemcpy(arrayX, arrayX_GPU, sizeof (float) *Nparticles, cudaMemcpyDeviceToHost));
     long long arrayX_time = get_time();
-    check_error(cudaMemcpy(arrayY, arrayY_GPU, sizeof (double) *Nparticles, cudaMemcpyDeviceToHost));
+    check_error(cudaMemcpy(arrayY, arrayY_GPU, sizeof (float) *Nparticles, cudaMemcpyDeviceToHost));
     long long arrayY_time = get_time();
-    check_error(cudaMemcpy(weights, weights_GPU, sizeof (double) *Nparticles, cudaMemcpyDeviceToHost));
+    check_error(cudaMemcpy(weights, weights_GPU, sizeof (float) *Nparticles, cudaMemcpyDeviceToHost));
     long long back_end_time = get_time();
-    printf("GPU Execution: %lf\n", elapsed_time(send_end, back_time));
-    printf("FREE TIME: %lf\n", elapsed_time(back_time, free_time));
-    printf("TIME TO SEND BACK: %lf\n", elapsed_time(back_time, back_end_time));
-    printf("SEND ARRAY X BACK: %lf\n", elapsed_time(free_time, arrayX_time));
-    printf("SEND ARRAY Y BACK: %lf\n", elapsed_time(arrayX_time, arrayY_time));
-    printf("SEND WEIGHTS BACK: %lf\n", elapsed_time(arrayY_time, back_end_time));
+    printf("GPU Execution: %f\n", elapsed_time(send_end, back_time));
+    printf("FREE TIME: %f\n", elapsed_time(back_time, free_time));
+    printf("TIME TO SEND BACK: %f\n", elapsed_time(back_time, back_end_time));
+    printf("SEND ARRAY X BACK: %f\n", elapsed_time(free_time, arrayX_time));
+    printf("SEND ARRAY Y BACK: %f\n", elapsed_time(arrayX_time, arrayY_time));
+    printf("SEND WEIGHTS BACK: %f\n", elapsed_time(arrayY_time, back_end_time));
 
     xe = 0;
     ye = 0;
@@ -978,10 +974,12 @@ void particleFilter(
         xe += arrayX[x] * weights[x];
         ye += arrayY[x] * weights[x];
     }
-    printf("XE: %lf\n", xe);
-    printf("YE: %lf\n", ye);
-    double distance = sqrt(pow((double) (xe - (int) roundDouble(IszY / 2.0)), 2) + pow((double) (ye - (int) roundDouble(IszX / 2.0)), 2));
-    printf("%lf\n", distance);
+    printf("XE: %f\n", xe);
+    printf("YE: %f\n", ye);
+    const float center_x_delta = xe - (int) roundFloat(IszY / 2.0F);
+    const float center_y_delta = ye - (int) roundFloat(IszX / 2.0F);
+    float distance = sqrtf(center_x_delta * center_x_delta + center_y_delta * center_y_delta);
+    printf("%f\n", distance);
     reference->dim_x = IszX;
     reference->dim_y = IszY;
     reference->frames = Nfr;
@@ -1008,7 +1006,7 @@ void particleFilter(
 
 int main(int argc, char * argv[]) {
 
-    char* usage = "double.out -x <dimX> -y <dimY> -z <Nfr> -np <Nparticles> [--seed <int>] [--save-reference <path>|--verify-reference <path>]";
+    const char* usage = "float.out -x <dimX> -y <dimY> -z <Nfr> -np <Nparticles> [--seed <int>] [--save-reference <path>|--verify-reference <path>]";
     //check number of arguments
     if (argc < 9) {
         printf("%s\n", usage);

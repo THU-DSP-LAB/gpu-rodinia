@@ -1,0 +1,9 @@
+GPIDL_RODINIA_PARTICLEFILTER_FLOAT_REFERENCE 2
+dim_x 128
+dim_y 128
+frames 10
+particles 1000
+seed_base 7
+xe 48.407444
+ye 72.0379791
+distance 17.5424309
