@@ -5,18 +5,18 @@ set -euo pipefail
 readonly DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT="$(cd "$DIR/../.." && pwd)"
 readonly OCLDIR="$DIR/../opencl"
-readonly OUTDIR="$DIR/results-pocl-nvidia"
-readonly POCL_LIBDIR="$ROOT/install/lib"
-readonly POCL_LOADER="$POCL_LIBDIR/libOpenCL.so.1"
-readonly POCL_SYMLINK_TARGET="libOpenCL.so.2.17.0"
 readonly DEFAULT_BENCHMARKS="b+tree backprop bfs cfd dwt2d gaussian heartwall hotspot hotspot3D hybridsort kmeans lavaMD leukocyte lud myocyte nn nw particlefilter pathfinder srad streamcluster"
+readonly DEFAULT_OUTPUT_DIR="$DIR/results-pocl-nvidia"
+readonly DEFAULT_POCL_INSTALL_DIR="$ROOT/pocl/build_cuda_stable/install"
 readonly DEFAULT_NATIVE_PLATFORM=0
 readonly DEFAULT_NATIVE_DEVICE=0
 readonly DEFAULT_POCL_PLATFORM=0
-readonly DEFAULT_POCL_DEVICE=1
+readonly DEFAULT_POCL_DEVICE=0
 readonly DEFAULT_POCL_ARCH="sm_89"
-
-mkdir -p "$OUTDIR"
+readonly DEFAULT_BENCHMARK_TIMEOUT_SECONDS=1800
+readonly TIMEOUT_KILL_GRACE_SECONDS=5
+readonly GPU_IDLE_WAIT_SECONDS=10
+readonly GPU_IDLE_POLL_SECONDS=0.2
 
 declare -A OUTPUT_FILES=(
   [b+tree]="output.txt"
@@ -87,6 +87,10 @@ native_device=$DEFAULT_NATIVE_DEVICE
 pocl_platform=$DEFAULT_POCL_PLATFORM
 pocl_device=$DEFAULT_POCL_DEVICE
 pocl_arch=$DEFAULT_POCL_ARCH
+output_dir=$DEFAULT_OUTPUT_DIR
+pocl_install_dir=$DEFAULT_POCL_INSTALL_DIR
+benchmark_timeout=$DEFAULT_BENCHMARK_TIMEOUT_SECONDS
+require_cold_cache=0
 
 usage() {
   cat <<'EOF'
@@ -98,8 +102,12 @@ Usage: run_pocl_nvidia.sh [options]
   --native-platform N        native OpenCL platform id (default: 0)
   --native-device N          native OpenCL device id (default: 0)
   --pocl-platform N          pocl platform id (default: 0)
-  --pocl-device N            pocl device id (default: 1)
+  --pocl-device N            pocl device id (default: 0)
   --pocl-arch ARCH           POCL_CUDA_GPU_ARCH value (default: sm_89)
+  --pocl-install-dir DIR     target PoCL installation
+  --output-dir DIR           evidence and isolated kernel-cache directory
+  --cold-cache               fail if the isolated kernel cache already exists
+  --timeout SECONDS          per backend run timeout; 0 disables (default: 1800)
 EOF
 }
 
@@ -137,6 +145,22 @@ while (($#)); do
       pocl_arch="${2:-}"
       shift 2
       ;;
+    --pocl-install-dir)
+      pocl_install_dir="${2:-}"
+      shift 2
+      ;;
+    --output-dir)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --cold-cache)
+      require_cold_cache=1
+      shift
+      ;;
+    --timeout)
+      benchmark_timeout="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -149,30 +173,94 @@ while (($#)); do
   esac
 done
 
+if [[ ! "$iterations" =~ ^[1-9][0-9]*$ ]]; then
+  echo "--iterations must be a positive integer" >&2
+  exit 1
+fi
+if [[ ! "$benchmark_timeout" =~ ^[0-9]+$ ]]; then
+  echo "--timeout must be a non-negative integer" >&2
+  exit 1
+fi
+
+readonly OUTDIR="$(realpath -m "$output_dir")"
+readonly POCL_INSTALL_DIR="$(realpath -m "$pocl_install_dir")"
+readonly POCL_LIBDIR="$POCL_INSTALL_DIR/lib"
+readonly POCL_LOADER_LINK="$POCL_LIBDIR/libOpenCL.so.1"
+readonly POCL_CACHE_DIR="$OUTDIR/kernel-cache"
+
+if ((require_cold_cache)) && [[ -e "$POCL_CACHE_DIR" ]]; then
+  echo "Cold-cache run requested, but cache already exists: $POCL_CACHE_DIR" >&2
+  exit 1
+fi
+mkdir -p "$OUTDIR"
+
 ensure_pocl_loader() {
-  if [[ ! -e "$POCL_LIBDIR/$POCL_SYMLINK_TARGET" ]]; then
-    echo "Missing PoCL loader target: $POCL_LIBDIR/$POCL_SYMLINK_TARGET" >&2
+  if [[ ! -e "$POCL_LOADER_LINK" ]]; then
+    echo "Missing PoCL loader: $POCL_LOADER_LINK" >&2
     return 1
   fi
-  if [[ ! -e "$POCL_LOADER" ]]; then
-    ln -sf "$POCL_SYMLINK_TARGET" "$POCL_LOADER"
+  local resolved_loader
+  resolved_loader="$(readlink -f "$POCL_LOADER_LINK")"
+  if [[ "$resolved_loader" != "$POCL_LIBDIR/"* ]]; then
+    echo "PoCL loader resolves outside target installation: $resolved_loader" >&2
+    return 1
   fi
 }
 
-normalize_log() {
-  sed -E \
-    -e '/^[[:space:]]*$/d' \
-    -e '/no version information available/d' \
-    -e '/^(Init|MemAlloc|HtoD|DtoH|Exec|Close|Total):/d' \
-    -e '/^(Platform|Device):/d' \
-    -e '/^WG size /d' \
-    -e '/^num_devices = /d' \
-    -e '/^Running on: /d' \
-    -e '/^Use GPU device$/d' \
-    -e '/^Time spent in different stages/d' \
-    -e '/^TOTAL TIME:/d' \
-    -e '/^[[:space:]]*Kernel[[:space:]]+[0-9]/d' \
-    "$1"
+gpu_processes() {
+  nvidia-smi \
+    --query-compute-apps=pid,process_name,used_memory \
+    --format=csv,noheader,nounits
+}
+
+wait_for_gpu_idle() {
+  local deadline=$((SECONDS + GPU_IDLE_WAIT_SECONDS))
+  local processes
+  processes="$(gpu_processes)"
+  while [[ -n "$processes" && $SECONDS -lt $deadline ]]; do
+    sleep "$GPU_IDLE_POLL_SECONDS"
+    processes="$(gpu_processes)"
+  done
+  [[ -z "$processes" ]] || printf '%s\n' "$processes"
+}
+
+assert_gpu_idle() {
+  local stage=$1
+  local processes
+  if processes="$(wait_for_gpu_idle)"; then
+    return 0
+  fi
+  echo "GPU is not idle $stage:" >&2
+  printf '%s\n' "$processes" >&2
+  return 1
+}
+
+verify_pocl_device() {
+  local verifier="$ROOT/pocl/tools/scripts/cuda_stable/verify_device.py"
+  env \
+    "LD_LIBRARY_PATH=$POCL_LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    POCL_DEVICES=cuda \
+    "$verifier" \
+    --library "$POCL_LIBDIR/libOpenCL.so" \
+    --output "$OUTDIR/device-contract.json"
+}
+
+record_environment() {
+  {
+    printf 'utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'benchmarks=%s\niterations=%s\n' "$benchmarks" "$iterations"
+    printf 'pocl_install=%s\npocl_loader=%s\n' \
+      "$POCL_INSTALL_DIR" "$(readlink -f "$POCL_LOADER_LINK")"
+    printf 'pocl_cache=%s\npocl_arch=%s\ntimeout_seconds=%s\n' \
+      "$POCL_CACHE_DIR" "$pocl_arch" "$benchmark_timeout"
+    nvidia-smi --query-gpu=name,driver_version,compute_cap,uuid \
+      --format=csv,noheader
+    printf 'llvm=' && /usr/bin/llvm-config-18 --version
+    printf 'pocl_commit=' && git -C "$ROOT/pocl" rev-parse HEAD
+    printf 'rodinia_commit=' && git -C "$ROOT/gpu-rodinia" rev-parse HEAD
+    git -C "$ROOT/pocl" status --short
+    git -C "$ROOT/gpu-rodinia" status --short
+  } > "$OUTDIR/environment.txt"
 }
 
 remove_outputs() {
@@ -211,6 +299,36 @@ build_benchmark() {
   ) |& tee "$OUTDIR/$benchmark.make.log"
 }
 
+verify_benchmark_loader() {
+  local benchmark=$1
+  local expected_loader
+  local found_opencl=0
+  expected_loader="$(readlink -f "$POCL_LOADER_LINK")"
+
+  while IFS= read -r -d '' executable; do
+    local loader
+    loader="$(
+      LD_LIBRARY_PATH="$POCL_LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        ldd "$executable" 2>/dev/null \
+        | awk '$2 == "=>" && $3 ~ /^\// && $1 ~ /^libOpenCL[.]so/ { print $3; exit }'
+    )"
+    if [[ -z "$loader" ]]; then
+      continue
+    fi
+    found_opencl=1
+    loader="$(readlink -f "$loader")"
+    if [[ "$loader" != "$expected_loader" ]]; then
+      echo "$executable resolves OpenCL to $loader, expected $expected_loader" >&2
+      return 1
+    fi
+  done < <(find "$OCLDIR/$benchmark" -maxdepth 1 -type f -perm /111 -print0)
+
+  if ((found_opencl == 0)); then
+    echo "No OpenCL-linked executable found for $benchmark" >&2
+    return 1
+  fi
+}
+
 run_benchmark() {
   local benchmark=$1
   local runtime=$2
@@ -241,7 +359,9 @@ run_benchmark() {
     pocl)
       envs+=(
         "LD_LIBRARY_PATH=$POCL_LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        "POCL_CACHE_DIR=$POCL_CACHE_DIR"
         "POCL_CUDA_GPU_ARCH=$pocl_arch"
+        "POCL_DEVICES=cuda"
       )
       if [[ "$mode" == "standard" ]]; then
         run_cmd+=(-p "$pocl_platform" -d "$pocl_device")
@@ -255,229 +375,47 @@ run_benchmark() {
       ;;
   esac
 
-  (
-    cd "$OCLDIR/$benchmark"
-    env "${envs[@]}" "${run_cmd[@]}"
-  ) |& tee "$log_file"
+  if ((benchmark_timeout == 0)); then
+    (
+      cd "$OCLDIR/$benchmark"
+      env "${envs[@]}" "${run_cmd[@]}"
+    ) |& tee "$log_file"
+  else
+    (
+      cd "$OCLDIR/$benchmark"
+      timeout --signal=TERM --kill-after="$TIMEOUT_KILL_GRACE_SECONDS" \
+        "$benchmark_timeout" env "${envs[@]}" "${run_cmd[@]}"
+    ) |& tee "$log_file"
+  fi
   status=${PIPESTATUS[0]}
 
   copy_outputs "$benchmark" "$runtime" "$iter"
+  if ! assert_gpu_idle "after $benchmark $runtime iteration $iter"; then
+    return 1
+  fi
+  if ((status == 124)); then
+    echo "  $benchmark $runtime iteration $iter timed out after ${benchmark_timeout}s" >&2
+  fi
   return "$status"
 }
 
 log_has_runtime_error() {
   local log_file=$1
   grep -Eiq \
-    '(^ERROR:|Segmentation fault|core dumped|exception|Failed to create|Could not create|CL_INVALID_|No devices available)' \
+    '(^ERROR:|Assertion|Aborted|SIGFPE|SIGSEGV|Segmentation fault|core dumped|exception|CUDA_ERROR_|Failed to create|Could not create|CL_INVALID_|No devices available)' \
     "$log_file"
 }
 
-compare_text_outputs() {
-  local file_a=$1
-  local file_b=$2
-  local abs_tol=$3
-  local rel_tol=$4
-
-  awk -v abs_tol="$abs_tol" -v rel_tol="$rel_tol" '
-    function absval(x) { return x < 0 ? -x : x }
-    function isnum(x, y) {
-      y = tolower(x)
-      return y == "nan" || y == "+nan" || y == "-nan" || y == "inf" || y == "+inf" || y == "-inf" \
-        || x ~ /^[-+]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][-+]?[0-9]+)?$/
-    }
-    function push_tokens(line, array_name,    tmp, n, i) {
-      gsub(/,/, " ", line)
-      gsub(/=/, " ", line)
-      gsub(/\r/, "", line)
-      n = split(line, tmp, /[[:space:]]+/)
-      for (i = 1; i <= n; ++i) {
-        if (tmp[i] == "")
-          continue
-        if (array_name == "A")
-          A[++count_a] = tmp[i]
-        else
-          B[++count_b] = tmp[i]
-      }
-    }
-    FNR == NR {
-      push_tokens($0, "A")
-      next
-    }
-    {
-      push_tokens($0, "B")
-    }
-    END {
-      if (count_a != count_b)
-        exit 1
-      for (i = 1; i <= count_a; ++i) {
-        if (A[i] == B[i])
-          continue
-        if (!isnum(A[i]) || !isnum(B[i]))
-          exit 1
-        if (tolower(A[i]) ~ /nan/ && tolower(B[i]) ~ /nan/)
-          continue
-        av = A[i] + 0
-        bv = B[i] + 0
-        diff = absval(av - bv)
-        scale = absval(av)
-        if (absval(bv) > scale)
-          scale = absval(bv)
-        limit = abs_tol
-        if (rel_tol * scale > limit)
-          limit = rel_tol * scale
-        if (diff > limit)
-          exit 1
-      }
-    }
-  ' "$file_a" "$file_b"
-}
-
-compare_pgm_outputs() {
-  local file_a=$1
-  local file_b=$2
-  local abs_tol=$3
-
-  awk -v abs_tol="$abs_tol" '
-    function absval(x) { return x < 0 ? -x : x }
-    function push_tokens(array_name,    i) {
-      for (i = 1; i <= NF; ++i)
-        if (array_name == "A")
-          A[++count_a] = $i
-        else
-          B[++count_b] = $i
-    }
-    FNR == NR {
-      push_tokens("A")
-      next
-    }
-    {
-      push_tokens("B")
-    }
-    END {
-      if (count_a != count_b)
-        exit 1
-      for (i = 1; i <= 4; ++i) {
-        if (A[i] != B[i])
-          exit 1
-      }
-      for (i = 5; i <= count_a; ++i) {
-        if (absval((A[i] + 0) - (B[i] + 0)) > abs_tol)
-          exit 1
-      }
-    }
-  ' "$file_a" "$file_b"
-}
-
-validate_btree_output() {
-  local file=$1
-
-  awk '
-    BEGIN {
-      split("840187 394382 783099 798440 911647 197551 335222 768229 277774 553970", expect_j, " ")
-      split("477397 628870 364784 513400 952229 916195 635711 717296 141602 606968", expect_k, " ")
-      mode = ""
-      j_seen = 0
-      k_seen = 0
-      j_count = 0
-      k_count = 0
-    }
-    /^[[:space:]]*\*+[[:space:]]*command:[[:space:]]*j[[:space:]]+count=10,[[:space:]]*rSize=10[[:space:]]*$/ {
-      mode = "j"
-      next
-    }
-    /^[[:space:]]*\*+[[:space:]]*command:[[:space:]]*k[[:space:]]+count=10[[:space:]]*$/ {
-      mode = "k"
-      next
-    }
-    mode == "j" && $1 ~ /^[0-9]+$/ {
-      idx = $1 + 1
-      if (idx < 1 || idx > 10 || $2 != expect_j[idx] || $3 != 11)
-        exit 1
-      j_count++
-      if (j_count == 10) {
-        j_seen = 1
-        mode = ""
-      }
-      next
-    }
-    mode == "k" && $1 ~ /^[0-9]+$/ {
-      idx = $1 + 1
-      if (idx < 1 || idx > 10 || $2 != expect_k[idx])
-        exit 1
-      k_count++
-      if (k_count == 10) {
-        k_seen = 1
-        mode = ""
-      }
-      next
-    }
-    END {
-      if (!j_seen || !k_seen || j_count != 10 || k_count != 10)
-        exit 1
-    }
-  ' "$file"
-}
-
-validate_outputs() {
-  local benchmark=$1
-  local iter=$2
-  local outputs="${OUTPUT_FILES[$benchmark]-}"
-  local abs_tol="${ABS_TOLERANCES[$benchmark]-0}"
-  local rel_tol="${REL_TOLERANCES[$benchmark]-0}"
-  local idx=0
-  local out_file
-
-  if [[ -n "$outputs" ]]; then
-    if [[ "$benchmark" == "b+tree" ]]; then
-      local pocl_file="$OUTDIR/$benchmark.pocl.$iter.0.out"
-      if ! validate_btree_output "$pocl_file"; then
-        echo "  validate failed for $benchmark (iter $iter): pocl output does not match expected queries" >&2
-        return 1
-      fi
-      return 0
-    fi
-
-    for out_file in ${outputs//|/ }; do
-      local native_file="$OUTDIR/$benchmark.native.$iter.$idx.out"
-      local pocl_file="$OUTDIR/$benchmark.pocl.$iter.$idx.out"
-      if [[ ! -f "$native_file" || ! -f "$pocl_file" ]]; then
-        echo "  validate failed for $benchmark (iter $iter): missing $out_file" >&2
-        return 1
-      fi
-      if [[ "$benchmark" == "srad" ]]; then
-        if ! compare_pgm_outputs "$native_file" "$pocl_file" 1; then
-          echo "  validate failed for $benchmark (iter $iter): $out_file mismatch" >&2
-          return 1
-        fi
-      elif [[ "$abs_tol" != 0 || "$rel_tol" != 0 ]]; then
-        if ! compare_text_outputs "$native_file" "$pocl_file" "$abs_tol" "$rel_tol"; then
-          echo "  validate failed for $benchmark (iter $iter): $out_file mismatch" >&2
-          return 1
-        fi
-      else
-        if ! cmp -s "$native_file" "$pocl_file"; then
-          echo "  validate failed for $benchmark (iter $iter): $out_file mismatch" >&2
-          return 1
-        fi
-      fi
-      idx=$((idx + 1))
-    done
-    return 0
-  fi
-
-  if ! diff -u \
-    <(normalize_log "$OUTDIR/$benchmark.native.$iter.log") \
-    <(normalize_log "$OUTDIR/$benchmark.pocl.$iter.log") \
-    > "$OUTDIR/$benchmark.validate.$iter.diff"; then
-    echo "  validate failed for $benchmark (iter $iter): normalized log mismatch" >&2
-    return 1
-  fi
-
-  return 0
-}
+source "$DIR/rodinia_validation.sh"
 
 ensure_pocl_loader
+assert_gpu_idle "before Rodinia validation"
+verify_pocl_device
+record_environment
 
+overall_pass=1
+passed_benchmarks=0
+failed_benchmarks=0
 for benchmark in $benchmarks; do
   : > "$OUTDIR/$benchmark.txt"
   echo "$(date) # running $benchmark"
@@ -489,12 +427,24 @@ for benchmark in $benchmarks; do
   if [[ ! -f "$OCLDIR/$benchmark/run" ]]; then
     echo "  missing run script for $benchmark" >&2
     printf "validate=%d pass=%s\n\n" "$validate" "NO" >> "$OUTDIR/$benchmark.txt"
+    overall_pass=0
+    failed_benchmarks=$((failed_benchmarks + 1))
     continue
   fi
 
   if ! build_benchmark "$benchmark"; then
     echo "  build failed for $benchmark" >&2
     printf "validate=%d pass=%s\n\n" "$validate" "NO" >> "$OUTDIR/$benchmark.txt"
+    overall_pass=0
+    failed_benchmarks=$((failed_benchmarks + 1))
+    echo
+    continue
+  fi
+  if ! verify_benchmark_loader "$benchmark"; then
+    echo "  loader verification failed for $benchmark" >&2
+    printf "validate=%d pass=%s\n\n" "$validate" "NO" >> "$OUTDIR/$benchmark.txt"
+    overall_pass=0
+    failed_benchmarks=$((failed_benchmarks + 1))
     echo
     continue
   fi
@@ -525,9 +475,19 @@ for benchmark in $benchmarks; do
 
   if ((pass)); then
     printf "validate=%d pass=%s\n\n" "$validate" "YES" >> "$OUTDIR/$benchmark.txt"
+    passed_benchmarks=$((passed_benchmarks + 1))
   else
     printf "validate=%d pass=%s\n\n" "$validate" "NO" >> "$OUTDIR/$benchmark.txt"
+    overall_pass=0
+    failed_benchmarks=$((failed_benchmarks + 1))
   fi
 
   echo
 done
+
+assert_gpu_idle "after Rodinia validation"
+printf 'passed=%d\nfailed=%d\n' "$passed_benchmarks" "$failed_benchmarks" \
+  | tee "$OUTDIR/summary.txt"
+if ((overall_pass == 0)); then
+  exit 1
+fi

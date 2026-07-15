@@ -32,7 +32,7 @@ find_ellipse.o: avilib.h
 track_ellipse.o: find_ellipse.h avilib.h
 
 $(MATRIX_DIR)/meschach.a:
-	cd $(MATRIX_DIR); ./configure --with-all; make all; make clean
+	$(MAKE) -C $(MATRIX_DIR) all && $(MAKE) -C $(MATRIX_DIR) clean
 
 clean:
 	rm -f *.o *~ leukocyte.out
