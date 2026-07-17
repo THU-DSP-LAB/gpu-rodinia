@@ -1,7 +1,5 @@
 data/*
 !data/.gitkeep
-!data/particlefilter/
-!data/particlefilter/cuda_float_128x128x10_np1000_seed7.reference
 
 *.o
 *.a
