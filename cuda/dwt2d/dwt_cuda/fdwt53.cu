@@ -192,6 +192,7 @@ namespace dwt_cuda {
       // Initialize all column info: initialize loaders, compute offset of 
       // column in shared buffer and initialize loader of column.
       const int firstY = blockIdx.y * WIN_SIZE_Y * winSteps;
+	  buffer.initializeOddRowPadding();
 	  initColumn(column, in, sizeX, sizeY, threadIdx.x, firstY); //has been checked Mar 9th
 
 	  

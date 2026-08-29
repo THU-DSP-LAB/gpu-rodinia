@@ -123,6 +123,16 @@ namespace dwt_cuda {
     }
 
   public:
+
+    /// Initializes the unused rightmost odd-column slot in every row.
+    /// horizontalStep traverses rows as one flat range and therefore touches
+    /// these padding slots even though they never contribute to image output.
+    __device__ void initializeOddRowPadding() {
+      if(threadIdx.x < SIZE_Y) {
+        data[ODD_OFFSET + threadIdx.x * VERTICAL_STRIDE
+            + VERTICAL_STRIDE - 1] = T();
+      }
+    }
     
     /// Gets offset of the column with given index. Central columns have 
     /// indices from 0 to NUM_LINES - 1, left boundary columns have negative 
@@ -336,4 +346,3 @@ namespace dwt_cuda {
 
 
 #endif	// TRANSFORM_BUFFER_H
-
