@@ -1,0 +1,12 @@
+GPIDL_RODINIA_HEARTWALL_REFERENCE 1
+video_name heartwall_test.avi
+video_hash bd0b9ac494c75d14
+video_bytes 262400
+total_frames 1
+frames_processed 1
+frame_rows 512
+frame_cols 512
+endo_points 20
+epi_points 31
+output_hash c1746e4a328452e0
+output_values 102
