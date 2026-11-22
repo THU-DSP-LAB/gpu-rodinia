@@ -67,35 +67,48 @@ findK(	long height,
 	// private thread IDs
 	int thid = get_local_id(0);
 	int bid = get_group_id(0);
+	__local long currKnodeL;
+	__local long offsetL;
+
+	if (thid == 0) {
+		currKnodeL = currKnodeD[bid];
+		offsetL = offsetD[bid];
+	}
+	barrier(CLK_LOCAL_MEM_FENCE);
 
 	// processtree levels
 	int i;
 	for(i = 0; i < height; i++){
+		long curr = currKnodeL;
 
 		// if value is between the two keys
-		if((knodesD[currKnodeD[bid]].keys[thid]) <= keysD[bid] && (knodesD[currKnodeD[bid]].keys[thid+1] > keysD[bid])){
+		if((knodesD[curr].keys[thid]) <= keysD[bid] && (knodesD[curr].keys[thid+1] > keysD[bid])){
 			// this conditional statement is inserted to avoid crush due to but in original code
 			// "offset[bid]" calculated below that addresses knodes[] in the next iteration goes outside of its bounds cause segmentation fault
 			// more specifically, values saved into knodes->indices in the main function are out of bounds of knodes that they address
-			if(knodesD[offsetD[bid]].indices[thid] < knodes_elem){
-				offsetD[bid] = knodesD[offsetD[bid]].indices[thid];
+			if(knodesD[curr].indices[thid] < knodes_elem){
+				offsetL = knodesD[curr].indices[thid];
 			}
 		}
-		//__syncthreads();
 		barrier(CLK_LOCAL_MEM_FENCE);
 		// set for next tree level
 		if(thid==0){
-			currKnodeD[bid] = offsetD[bid];
+			currKnodeL = offsetL;
 		}
-		//__syncthreads();
 		barrier(CLK_LOCAL_MEM_FENCE);
 
 	}
 
+	if (thid == 0) {
+		currKnodeD[bid] = currKnodeL;
+		offsetD[bid] = offsetL;
+	}
+	barrier(CLK_LOCAL_MEM_FENCE);
+
 	//At this point, we have a candidate leaf node which may contain
 	//the target record.  Check each key to hopefully find the record
-	if(knodesD[currKnodeD[bid]].keys[thid] == keysD[bid]){
-		ansD[bid].value = recordsD[knodesD[currKnodeD[bid]].indices[thid]].value;
+	if(knodesD[currKnodeL].keys[thid] == keysD[bid]){
+		ansD[bid].value = recordsD[knodesD[currKnodeL].indices[thid]].value;
 	}
 
 }
